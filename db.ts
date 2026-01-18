@@ -62,6 +62,7 @@ class DataService {
   }
 
   private async request(action: string, collection: string, body: any = {}) {
+    // Session is always local for browser persistence
     if (collection === 'session' || this.mode === 'LOCAL') {
       return this.simulateLocalRequest(action, collection, body);
     }
@@ -153,12 +154,18 @@ class DataService {
         return { insertedId: body.document.id };
 
       case 'updateOne':
-        const index = data.findIndex((d: any) => d.id === body.filter.id);
+        const id = body.filter.id;
+        const index = data.findIndex((d: any) => d.id === id);
+        const updateSet = body.update.$set;
+        
         if (index !== -1) {
-          data[index] = { ...data[index], ...body.update.$set };
-          localStorage.setItem(storageKey, JSON.stringify(data));
+          data[index] = { ...data[index], ...updateSet };
+        } else {
+          // Upsert: Create if missing
+          data.push({ id, ...updateSet });
         }
-        return { modifiedCount: index !== -1 ? 1 : 0 };
+        localStorage.setItem(storageKey, JSON.stringify(data));
+        return { modifiedCount: 1 };
 
       default:
         return {};
