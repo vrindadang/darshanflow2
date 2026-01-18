@@ -6,14 +6,90 @@ import Requestor from './views/Requestor.tsx';
 import Approver from './views/Approver.tsx';
 import Finance from './views/Finance.tsx';
 import { Role } from './types.ts';
-import { BookOpen, LogOut, User as UserIcon, Bell, X, Download, Upload, Check, AlertCircle, Database, Globe, HelpCircle, FileJson, RefreshCw, Layers, Server, Activity } from 'lucide-react';
+// Added Loader2 to the imports from lucide-react
+import { BookOpen, LogOut, User as UserIcon, Bell, X, Download, Upload, Check, AlertCircle, Database, Globe, HelpCircle, FileJson, RefreshCw, Layers, Server, Activity, Terminal, ClipboardCheck, Info, Loader2 } from 'lucide-react';
 import { cn, Card, Button, Input, Label } from './components/ui.tsx';
-import { mongoDB } from './db.ts';
+import { mongoDB, ConnectionStatus } from './db.ts';
+
+const SUPABASE_SQL = `-- Supabase Schema for DarshanFlow
+CREATE TABLE IF NOT EXISTS requests (
+  id TEXT PRIMARY KEY,
+  "schoolId" TEXT,
+  "schoolName" TEXT,
+  category TEXT,
+  description TEXT,
+  amount NUMERIC,
+  status TEXT,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "approverComments" TEXT,
+  "financeComments" TEXT,
+  "rejectionReason" TEXT,
+  "attachmentName" TEXT,
+  session TEXT,
+  "expenseDate" DATE,
+  "exceedsBudgetReason" TEXT
+);
+
+CREATE TABLE IF NOT EXISTS budgets (
+  id TEXT PRIMARY KEY, -- schoolId
+  data JSONB
+);
+
+CREATE TABLE IF NOT EXISTS budgetLogs (
+  id TEXT PRIMARY KEY,
+  timestamp TIMESTAMPTZ DEFAULT NOW(),
+  "adminName" TEXT,
+  "schoolName" TEXT,
+  session TEXT,
+  category TEXT,
+  quarter TEXT,
+  "oldAmount" NUMERIC,
+  "newAmount" NUMERIC
+);
+
+CREATE TABLE IF NOT EXISTS budgetRequests (
+  id TEXT PRIMARY KEY,
+  "schoolId" TEXT,
+  "schoolName" TEXT,
+  session TEXT,
+  data JSONB,
+  status TEXT,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW(),
+  note TEXT,
+  "attachmentName" TEXT,
+  "adminComments" TEXT
+);
+
+-- Note: RLS is disabled by default for simplicity in REST setup. 
+-- In production, you should enable RLS and set policies.
+ALTER TABLE requests DISABLE ROW LEVEL SECURITY;
+ALTER TABLE budgets DISABLE ROW LEVEL SECURITY;
+ALTER TABLE budgetLogs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE budgetRequests DISABLE ROW LEVEL SECURITY;`;
 
 const MainLayout: React.FC = () => {
   const { user, logout, lastSync } = useApp();
   const [showDataMenu, setShowDataMenu] = useState(false);
+  const [showSqlSetup, setShowSqlSetup] = useState(false);
+  const [diag, setDiag] = useState<ConnectionStatus | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
+  const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (showDataMenu) {
+      runTest();
+    }
+  }, [showDataMenu]);
+
+  const runTest = async () => {
+    setIsTesting(true);
+    const result = await mongoDB.testConnection();
+    setDiag(result);
+    setIsTesting(false);
+  };
 
   if (!user) return <Login />;
 
@@ -26,6 +102,12 @@ const MainLayout: React.FC = () => {
     a.download = `DarshanFlow_Backup_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const copySql = () => {
+    navigator.clipboard.writeText(SUPABASE_SQL);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -70,17 +152,23 @@ const MainLayout: React.FC = () => {
                     </p>
                     <span className="text-gray-300">|</span>
                     {mongoDB.isLive ? (
-                      <div className="flex items-center gap-1.5">
+                      <button 
+                        onClick={() => setShowDataMenu(true)}
+                        className={cn(
+                          "flex items-center gap-1.5 p-0.5 pr-1.5 rounded-full border transition-all",
+                          diag?.ok ? "bg-emerald-50 border-emerald-100 text-emerald-600" : "bg-rose-50 border-rose-100 text-rose-600"
+                        )}
+                      >
                         <span className={cn(
-                          "flex items-center gap-1 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border",
-                          mongoDB.mode === 'SUPABASE' ? "text-emerald-600 bg-emerald-50 border-emerald-100" : "text-blue-600 bg-blue-50 border-blue-100"
+                          "text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full",
+                          diag?.ok ? "bg-emerald-500 text-white" : "bg-rose-500 text-white"
                         )}>
-                          <Globe className="w-2.5 h-2.5" /> {mongoDB.mode} Cloud
+                          <Globe className="w-2.5 h-2.5" />
                         </span>
-                        <div className="flex items-center gap-1 text-[8px] text-slate-400 font-bold uppercase tracking-tighter">
-                          <Activity className="w-2 h-2 text-emerald-500 animate-pulse" /> Live Syncing
-                        </div>
-                      </div>
+                        <span className="text-[9px] font-bold uppercase tracking-tight">
+                          {diag?.ok ? 'Supabase Connected' : 'Supabase Error'}
+                        </span>
+                      </button>
                     ) : (
                       <button 
                         onClick={() => setShowDataMenu(true)}
@@ -123,34 +211,52 @@ const MainLayout: React.FC = () => {
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Layers className="w-6 h-6" /></div>
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900 leading-tight">Data Strategy</h3>
-                  <p className="text-slate-500 text-xs">Manage your school's data storage</p>
+                  <h3 className="text-lg font-bold text-slate-900 leading-tight">Workspace Control</h3>
+                  <p className="text-slate-500 text-xs">Cloud Synchronization & Database</p>
                 </div>
               </div>
               <button onClick={() => setShowDataMenu(false)} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6" /></button>
             </div>
             
-            <div className="p-6 space-y-8">
+            <div className="p-6 space-y-6">
               <div className="space-y-4">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Active Connection</h4>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className={cn("p-4 rounded-xl border flex flex-col gap-2 transition-all", mongoDB.mode === 'SUPABASE' ? "bg-emerald-50 border-emerald-200 ring-2 ring-emerald-500/20" : "bg-slate-50 border-slate-200 opacity-60")}>
-                    <div className="flex justify-between">
-                      <Server className={cn("w-5 h-5", mongoDB.mode === 'SUPABASE' ? "text-emerald-600" : "text-slate-400")} />
-                      {mongoDB.mode === 'SUPABASE' && <Check className="w-4 h-4 text-emerald-600" />}
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  Cloud Diagnostics {isTesting && <Loader2 className="w-3 h-3 animate-spin" />}
+                </h4>
+                
+                {diag?.ok ? (
+                  <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 flex items-center gap-3">
+                    <Check className="w-5 h-5 text-emerald-600" />
+                    <div>
+                      <p className="text-xs font-bold text-emerald-900">Cloud Sync Active</p>
+                      <p className="text-[10px] text-emerald-600">Your data is being saved to shamowqhlntodbxpnakz.supabase.co</p>
                     </div>
-                    <span className="font-bold text-slate-900">Supabase</span>
-                    <span className="text-[10px] text-slate-500">Professional SQL database. Synchronized across all users.</span>
                   </div>
-                  <div className={cn("p-4 rounded-xl border flex flex-col gap-2 transition-all", mongoDB.mode === 'MONGODB' ? "bg-blue-50 border-blue-200 ring-2 ring-blue-500/20" : "bg-slate-50 border-slate-200 opacity-60")}>
-                    <div className="flex justify-between">
-                      <Database className={cn("w-5 h-5", mongoDB.mode === 'MONGODB' ? "text-blue-600" : "text-slate-400")} />
-                      {mongoDB.mode === 'MONGODB' && <Check className="w-4 h-4 text-blue-600" />}
+                ) : (
+                  <div className="p-4 bg-rose-50 rounded-xl border border-rose-100 space-y-3">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-xs font-bold text-rose-900">Cloud Connection Incomplete</p>
+                        <p className="text-[10px] text-rose-600 leading-relaxed">
+                          The app is currently falling back to <strong>Local Storage</strong> because the Supabase tables are missing.
+                        </p>
+                      </div>
                     </div>
-                    <span className="font-bold text-slate-900">MongoDB</span>
-                    <span className="text-[10px] text-slate-500">NoSQL Document store. Flexible but requires App ID.</span>
+                    {diag?.tablesMissing && (
+                      <div className="pl-8 flex flex-wrap gap-2">
+                        {diag.tablesMissing.map(t => (
+                          <span key={t} className="text-[9px] font-bold bg-rose-100 text-rose-700 px-2 py-0.5 rounded border border-rose-200">Table '{t}' missing</span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="pt-2 pl-8">
+                       <Button onClick={() => setShowSqlSetup(true)} size="sm" className="bg-rose-600 text-[10px] h-8 font-bold">
+                         <Terminal className="w-3 h-3" /> Supabase SQL Setup
+                       </Button>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
               <div className="space-y-4">
@@ -173,17 +279,53 @@ const MainLayout: React.FC = () => {
                   </button>
                 </div>
               </div>
-
-              {!mongoDB.isLive && (
-                <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 flex gap-3">
-                  <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-                  <p className="text-xs text-amber-800 leading-relaxed">
-                    You are currently using <strong>Offline Mode</strong>. Your data is safe in this browser, but to share it with other schools, you must either connect a cloud database or use the <strong>Export/Import</strong> tools above.
-                  </p>
-                </div>
-              )}
             </div>
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end"><Button onClick={() => setShowDataMenu(false)} variant="secondary">Close</Button></div>
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+               <Button onClick={runTest} variant="ghost" size="sm">Retry Connection</Button>
+               <Button onClick={() => setShowDataMenu(false)} variant="secondary" size="sm">Close</Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {showSqlSetup && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 animate-fade-in">
+          <Card className="w-full max-w-2xl p-0 overflow-hidden shadow-2xl border-none">
+            <div className="bg-slate-900 p-6 text-white flex justify-between items-center">
+               <div className="flex items-center gap-3">
+                  <Terminal className="w-6 h-6 text-emerald-400" />
+                  <div>
+                    <h3 className="font-bold">Supabase SQL Schema</h3>
+                    <p className="text-slate-400 text-xs tracking-tight">Paste this into your Supabase SQL Editor to go live.</p>
+                  </div>
+               </div>
+               <button onClick={() => setShowSqlSetup(false)} className="text-slate-400 hover:text-white"><X className="w-6 h-6" /></button>
+            </div>
+            <div className="p-0 relative">
+               <pre className="bg-slate-800 p-6 text-[11px] text-emerald-300 font-mono overflow-auto max-h-[400px] leading-relaxed select-all">
+                 {SUPABASE_SQL}
+               </pre>
+               <div className="absolute top-4 right-4">
+                  <Button 
+                    onClick={copySql} 
+                    className={cn("text-[10px] h-9 px-4 font-bold border-none", copied ? "bg-emerald-600 text-white" : "bg-white/10 text-white hover:bg-white/20")}
+                  >
+                    {copied ? <ClipboardCheck className="w-4 h-4" /> : <Layers className="w-4 h-4" />}
+                    {copied ? 'Copied to Clipboard' : 'Copy Code'}
+                  </Button>
+               </div>
+            </div>
+            <div className="p-6 bg-slate-50 border-t border-slate-200 space-y-4">
+              <div className="flex gap-3">
+                 <div className="bg-blue-100 p-2 rounded-lg shrink-0"><Info className="w-5 h-5 text-blue-600" /></div>
+                 <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                   <strong>Instructions:</strong> Open your Supabase dashboard, go to the <strong>SQL Editor</strong> in the left menu, create a <strong>"New Query"</strong>, paste this code, and click <strong>"Run"</strong>. Once finished, refresh this app.
+                 </p>
+              </div>
+              <div className="flex justify-end pt-2">
+                 <Button onClick={() => setShowSqlSetup(false)} className="bg-slate-900 hover:bg-slate-800 px-8">Got it</Button>
+              </div>
+            </div>
           </Card>
         </div>
       )}

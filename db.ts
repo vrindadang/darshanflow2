@@ -17,6 +17,13 @@ const CONFIG = {
   CLUSTER: 'DarshanFlow'
 };
 
+export interface ConnectionStatus {
+  ok: boolean;
+  message: string;
+  error?: string;
+  tablesMissing?: string[];
+}
+
 class DataService {
   get mode() {
     if (CONFIG.SUPABASE_URL && CONFIG.SUPABASE_KEY && CONFIG.SUPABASE_URL.includes('supabase.co')) return 'SUPABASE';
@@ -28,18 +35,42 @@ class DataService {
     return this.mode !== 'LOCAL';
   }
 
+  async testConnection(): Promise<ConnectionStatus> {
+    if (this.mode === 'LOCAL') return { ok: true, message: 'Running in Local mode.' };
+    
+    if (this.mode === 'SUPABASE') {
+      try {
+        const tables = ['requests', 'budgets', 'budgetLogs', 'budgetRequests'];
+        const missing: string[] = [];
+        
+        for (const table of tables) {
+          const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${table}?limit=1`, {
+            headers: { 'apikey': CONFIG.SUPABASE_KEY, 'Authorization': `Bearer ${CONFIG.SUPABASE_KEY}` }
+          });
+          if (!res.ok) missing.push(table);
+        }
+
+        if (missing.length > 0) {
+          return { ok: false, message: 'Connected to Supabase, but tables are missing.', tablesMissing: missing };
+        }
+        return { ok: true, message: 'Cloud connection healthy and tables ready.' };
+      } catch (e: any) {
+        return { ok: false, message: 'Cannot reach Supabase servers.', error: e.message };
+      }
+    }
+    return { ok: true, message: 'Connection test not implemented for this mode.' };
+  }
+
   private async request(action: string, collection: string, body: any = {}) {
-    // CRITICAL: 'session' must ALWAYS be local so users don't override each other's login state in the cloud
     if (collection === 'session' || this.mode === 'LOCAL') {
       return this.simulateLocalRequest(action, collection, body);
     }
     
-    // Try Cloud
     if (this.mode === 'SUPABASE') {
       try {
         return await this.supabaseRequest(action, collection, body);
       } catch (e) {
-        console.warn(`Supabase ${action} failed on ${collection}. Falling back to Local Storage.`, e);
+        console.warn(`Supabase ${action} failed on ${collection}. Falling back to Local Storage.`);
         return this.simulateLocalRequest(action, collection, body);
       }
     }
@@ -58,9 +89,9 @@ class DataService {
     };
 
     if (action === 'find') {
-      const query = body.filter?.id ? `?id=eq.${body.filter.id}` : '';
+      const query = body.filter?.id ? `?id=eq.${encodeURIComponent(body.filter.id)}` : '';
       const res = await fetch(`${baseUrl}${query}`, { headers });
-      if (!res.ok) throw new Error(`Table ${table} might not exist yet.`);
+      if (!res.ok) throw new Error(`Table ${table} not found or inaccessible.`);
       const data = await res.json();
       return { documents: Array.isArray(data) ? data : [data] };
     }
@@ -76,7 +107,7 @@ class DataService {
     }
 
     if (action === 'updateOne') {
-      const query = `?id=eq.${body.filter.id}`;
+      const query = `?id=eq.${encodeURIComponent(body.filter.id)}`;
       const res = await fetch(`${baseUrl}${query}`, {
         method: 'PATCH',
         headers,
@@ -94,16 +125,8 @@ class DataService {
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'api-key': CONFIG.MONGO_API_KEY,
-        },
-        body: JSON.stringify({
-          dataSource: CONFIG.CLUSTER,
-          database: CONFIG.DATABASE,
-          collection: collection,
-          ...body,
-        }),
+        headers: { 'Content-Type': 'application/json', 'api-key': CONFIG.MONGO_API_KEY },
+        body: JSON.stringify({ dataSource: CONFIG.CLUSTER, database: CONFIG.DATABASE, collection: collection, ...body }),
       });
       if (!response.ok) return this.simulateLocalRequest(action, collection, body);
       return await response.json();
