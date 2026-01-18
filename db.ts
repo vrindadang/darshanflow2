@@ -25,6 +25,8 @@ export interface ConnectionStatus {
 }
 
 class DataService {
+  private _lastStatus: ConnectionStatus | null = null;
+
   get mode() {
     if (CONFIG.SUPABASE_URL && CONFIG.SUPABASE_KEY && CONFIG.SUPABASE_URL.includes('supabase.co')) return 'SUPABASE';
     if (CONFIG.MONGO_APP_ID !== 'YOUR_APP_ID' && CONFIG.MONGO_APP_ID.length > 5) return 'MONGODB';
@@ -35,30 +37,49 @@ class DataService {
     return this.mode !== 'LOCAL';
   }
 
+  // Getter to access status from outside without re-triggering tests unnecessarily
+  get lastStatus() {
+    return this._lastStatus;
+  }
+
   async testConnection(): Promise<ConnectionStatus> {
-    if (this.mode === 'LOCAL') return { ok: true, message: 'Running in Local mode.' };
+    if (this.mode === 'LOCAL') {
+      this._lastStatus = { ok: true, message: 'Running in Local mode.' };
+      return this._lastStatus;
+    }
     
     if (this.mode === 'SUPABASE') {
       try {
         const tables = ['requests', 'budgets', 'budgetLogs', 'budgetRequests'];
         const missing: string[] = [];
         
-        for (const table of tables) {
+        // Parallel check for performance
+        const checks = await Promise.all(tables.map(async (table) => {
           const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${table}?limit=1`, {
-            headers: { 'apikey': CONFIG.SUPABASE_KEY, 'Authorization': `Bearer ${CONFIG.SUPABASE_KEY}` }
+            headers: { 
+              'apikey': CONFIG.SUPABASE_KEY, 
+              'Authorization': `Bearer ${CONFIG.SUPABASE_KEY}` 
+            }
           });
-          if (!res.ok) missing.push(table);
-        }
+          return { table, ok: res.ok };
+        }));
+
+        checks.forEach(c => { if (!c.ok) missing.push(c.table); });
 
         if (missing.length > 0) {
-          return { ok: false, message: 'Connected to Supabase, but tables are missing.', tablesMissing: missing };
+          this._lastStatus = { ok: false, message: 'Connected to Supabase, but tables are missing.', tablesMissing: missing };
+        } else {
+          this._lastStatus = { ok: true, message: 'Cloud connection healthy and tables ready.' };
         }
-        return { ok: true, message: 'Cloud connection healthy and tables ready.' };
+        return this._lastStatus;
       } catch (e: any) {
-        return { ok: false, message: 'Cannot reach Supabase servers.', error: e.message };
+        this._lastStatus = { ok: false, message: 'Cannot reach Supabase servers.', error: e.message };
+        return this._lastStatus;
       }
     }
-    return { ok: true, message: 'Connection test not implemented for this mode.' };
+    
+    this._lastStatus = { ok: true, message: 'Connection test not implemented for this mode.' };
+    return this._lastStatus;
   }
 
   private async request(action: string, collection: string, body: any = {}) {
@@ -69,7 +90,12 @@ class DataService {
     
     if (this.mode === 'SUPABASE') {
       try {
-        return await this.supabaseRequest(action, collection, body);
+        const res = await this.supabaseRequest(action, collection, body);
+        // If we made a successful request, connection is definitely OK
+        if (this._lastStatus?.ok === false) {
+           this.testConnection(); // Re-validate in background to clear error state
+        }
+        return res;
       } catch (e) {
         console.warn(`Supabase ${action} failed on ${collection}. Falling back to Local Storage.`);
         return this.simulateLocalRequest(action, collection, body);

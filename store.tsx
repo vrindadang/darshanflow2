@@ -49,6 +49,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Reusable refresh logic for background sync
   const refreshData = useCallback(async (isInitial = false) => {
     try {
+      // Explicitly trigger a connection check during initial refresh to update UI state
+      if (isInitial && mongoDB.isLive) {
+        await mongoDB.testConnection();
+      }
+
       const [requestsRes, budgetRequestsRes, budgetLogsRes, budgetsRes] = await Promise.all([
         mongoDB.find('requests'),
         mongoDB.find('budgetRequests'),
@@ -90,10 +95,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => {
     const hydrate = async () => {
       try {
+        // Find session - uses local request under the hood
         const sessionRes = await mongoDB.find('session', { id: 'current_user' });
         if (sessionRes.documents?.[0]?.user) {
           setUser(sessionRes.documents[0].user);
         }
+        // Load data and check Supabase connectivity
         await refreshData(true);
       } catch (error) {
         console.error("Hydration failed", error);
@@ -115,20 +122,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const login = async (newUser: User) => {
     setUser(newUser);
-    await mongoDB.updateOne('session', 'current_user', { user: newUser });
+    // Explicitly update session with id to ensure persistence
+    await mongoDB.updateOne('session', 'current_user', { id: 'current_user', user: newUser });
+    // Refresh data to ensure UI syncs with cloud if applicable
+    await refreshData();
   };
   
   const logout = async () => {
     setUser(null);
     setSelectedRequest(null);
-    await mongoDB.updateOne('session', 'current_user', { user: null });
+    await mongoDB.updateOne('session', 'current_user', { id: 'current_user', user: null });
   };
 
   const updateUserProfile = async (name: string, password?: string) => {
     if (user) {
       const updated = { ...user, name };
       setUser(updated);
-      await mongoDB.updateOne('session', 'current_user', { user: updated });
+      await mongoDB.updateOne('session', 'current_user', { id: 'current_user', user: updated });
     }
   };
 

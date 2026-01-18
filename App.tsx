@@ -73,16 +73,30 @@ const MainLayout: React.FC = () => {
   const { user, logout, lastSync } = useApp();
   const [showDataMenu, setShowDataMenu] = useState(false);
   const [showSqlSetup, setShowSqlSetup] = useState(false);
-  const [diag, setDiag] = useState<ConnectionStatus | null>(null);
+  const [diag, setDiag] = useState<ConnectionStatus | null>(mongoDB.lastStatus);
   const [isTesting, setIsTesting] = useState(false);
   const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    // Immediate check on mount
+    runTest();
+  }, []);
+
+  useEffect(() => {
+    // Re-check when menu opens
     if (showDataMenu) {
       runTest();
     }
   }, [showDataMenu]);
+
+  // Listen for background sync updates to connectivity
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDiag(mongoDB.lastStatus);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const runTest = async () => {
     setIsTesting(true);
@@ -163,10 +177,10 @@ const MainLayout: React.FC = () => {
                           "text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full",
                           diag?.ok ? "bg-emerald-500 text-white" : "bg-rose-500 text-white"
                         )}>
-                          <Globe className="w-2.5 h-2.5" />
+                          {isTesting ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Globe className="w-2.5 h-2.5" />}
                         </span>
                         <span className="text-[9px] font-bold uppercase tracking-tight">
-                          {diag?.ok ? 'Supabase Connected' : 'Supabase Error'}
+                          {diag?.ok ? 'Supabase Connected' : diag ? 'Supabase Error' : 'Checking...'}
                         </span>
                       </button>
                     ) : (
