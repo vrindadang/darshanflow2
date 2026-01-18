@@ -29,8 +29,10 @@ class DataService {
   }
 
   private async request(action: string, collection: string, body: any = {}) {
-    // Force local if not live
-    if (this.mode === 'LOCAL') return this.simulateLocalRequest(action, collection, body);
+    // CRITICAL: 'session' must ALWAYS be local so users don't override each other's login state in the cloud
+    if (collection === 'session' || this.mode === 'LOCAL') {
+      return this.simulateLocalRequest(action, collection, body);
+    }
     
     // Try Cloud
     if (this.mode === 'SUPABASE') {

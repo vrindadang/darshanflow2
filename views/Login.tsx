@@ -1,5 +1,6 @@
+
 import React, { useState } from 'react';
-import { School, ShieldCheck, Landmark, ArrowRight, BookOpen } from 'lucide-react';
+import { School, ShieldCheck, Landmark, ArrowRight, BookOpen, Key, Info, AlertTriangle } from 'lucide-react';
 import { useApp } from '../store.tsx';
 import { Role, User } from '../types.ts';
 import { SCHOOLS } from '../constants.ts';
@@ -13,41 +14,57 @@ const Login: React.FC = () => {
   const [schoolId, setSchoolId] = useState(SCHOOLS[0].id);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
     
-    // Simulate Login Logic
-    let user: User;
+    let user: User | null = null;
 
     if (activeTab === Role.REQUESTOR) {
-      const school = SCHOOLS.find(s => s.id === schoolId);
-      user = {
-        id: schoolId,
-        name: school?.name || 'School Admin',
-        role: Role.REQUESTOR,
-        schoolId: schoolId
-      };
+      if (password === 'school@def') {
+        const school = SCHOOLS.find(s => s.id === schoolId);
+        user = {
+          id: schoolId,
+          name: school?.name || 'School Admin',
+          role: Role.REQUESTOR,
+          schoolId: schoolId
+        };
+      } else {
+        setError("Invalid school password.");
+      }
     } else if (activeTab === Role.APPROVER) {
-      user = {
-        id: 'admin-1',
-        name: 'Head Office Admin',
-        role: Role.APPROVER
-      };
+      if (email === 'admin@def.org' && password === 'admin@123') {
+        user = {
+          id: 'admin-1',
+          name: 'Head Office Admin',
+          role: Role.APPROVER,
+          email: 'admin@def.org'
+        };
+      } else {
+        setError("Invalid admin credentials.");
+      }
     } else {
-      user = {
-        id: 'finance-1',
-        name: 'Finance Manager',
-        role: Role.FINANCE
-      };
+      if (email === 'finance@def.org' && password === 'finance@123') {
+        user = {
+          id: 'finance-1',
+          name: 'Finance Manager',
+          role: Role.FINANCE,
+          email: 'finance@def.org'
+        };
+      } else {
+        setError("Invalid finance credentials.");
+      }
     }
     
-    login(user);
+    if (user) login(user);
   };
 
   const TabButton = ({ role, icon: Icon, label }: { role: Role; icon: React.ElementType; label: string }) => (
     <button
-      onClick={() => setActiveTab(role)}
+      onClick={() => { setActiveTab(role); setError(null); setPassword(''); }}
       className={cn(
         "flex-1 flex flex-col items-center justify-center p-4 gap-2 transition-all border-b-2",
         activeTab === role 
@@ -62,15 +79,15 @@ const Login: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-4">
-      <div className="mb-8 text-center">
-        <div className="bg-white p-3 rounded-2xl shadow-sm inline-block mb-4">
+      <div className="mb-8 text-center animate-fade-in">
+        <div className="bg-white p-3 rounded-2xl shadow-sm inline-block mb-4 border border-slate-100">
            <BookOpen className="w-10 h-10 text-blue-600" />
         </div>
         <h1 className="text-3xl font-bold text-gray-900 mb-2">DarshanFlow</h1>
-        <p className="text-gray-500 text-sm">Expense Approval Workflow System</p>
+        <p className="text-gray-500 text-sm">Darshan Education Foundation Chain</p>
       </div>
 
-      <Card className="w-full max-w-md overflow-hidden border-0 shadow-xl ring-1 ring-gray-900/5">
+      <Card className="w-full max-w-md overflow-hidden border-0 shadow-2xl ring-1 ring-gray-900/5 bg-white/80 backdrop-blur-sm">
         <div className="flex border-b border-gray-100">
           <TabButton role={Role.REQUESTOR} icon={School} label="School" />
           <TabButton role={Role.APPROVER} icon={ShieldCheck} label="Admin" />
@@ -80,24 +97,30 @@ const Login: React.FC = () => {
         <div className="p-8">
           <form onSubmit={handleLogin} className="space-y-6">
             <div className="space-y-1">
-              <h2 className="text-xl font-semibold text-gray-900">
-                {activeTab === Role.REQUESTOR ? 'School Login' : activeTab === Role.APPROVER ? 'Admin Login' : 'Finance Login'}
+              <h2 className="text-xl font-bold text-gray-900">
+                {activeTab === Role.REQUESTOR ? 'School Portal' : activeTab === Role.APPROVER ? 'HO Admin' : 'Finance Desk'}
               </h2>
-              <p className="text-sm text-gray-500">
-                {activeTab === Role.REQUESTOR 
-                  ? 'Select your school to access the portal.' 
-                  : 'Enter your credentials to access the dashboard.'}
+              <p className="text-xs text-gray-500">
+                Authorized access for Darshan Education Foundation staff only.
               </p>
             </div>
 
+            {error && (
+              <div className="bg-red-50 border border-red-100 p-3 rounded-xl flex items-center gap-3 animate-fade-in">
+                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                <p className="text-xs font-bold text-red-700">{error}</p>
+              </div>
+            )}
+
             {activeTab === Role.REQUESTOR ? (
               <div className="space-y-4">
-                <div>
-                  <Label htmlFor="school">Select School Location</Label>
+                <div className="space-y-2">
+                  <Label htmlFor="school">Location</Label>
                   <Select 
                     id="school" 
                     value={schoolId} 
                     onChange={(e) => setSchoolId(e.target.value)}
+                    className="h-11 rounded-xl"
                   >
                     {SCHOOLS.map(s => (
                       <option key={s.id} value={s.id}>
@@ -106,44 +129,86 @@ const Login: React.FC = () => {
                     ))}
                   </Select>
                 </div>
-                <div>
-                  <Label htmlFor="password">Password</Label>
-                  <Input id="password" type="password" placeholder="Enter school password" value="••••••••" readOnly className="bg-gray-50 text-gray-500" />
+                <div className="space-y-2">
+                  <Label htmlFor="password">School Password</Label>
+                  <Input 
+                    id="password" 
+                    type="password" 
+                    placeholder="Enter location password" 
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="h-11 rounded-xl"
+                  />
                 </div>
               </div>
             ) : (
               <div className="space-y-4">
-                <div>
-                  <Label htmlFor="email">Email Address</Label>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Official Email</Label>
                   <Input 
                     id="email" 
                     type="email" 
                     placeholder="name@darshanacademy.org" 
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    className="h-11 rounded-xl"
                   />
                 </div>
-                <div>
-                  <Label htmlFor="password">Password</Label>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Secret Password</Label>
                   <Input 
                     id="password" 
                     type="password" 
                     placeholder="••••••••" 
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    className="h-11 rounded-xl"
                   />
                 </div>
               </div>
             )}
 
-            <Button type="submit" className="w-full py-2.5 text-base">
-              Sign In <ArrowRight className="w-4 h-4" />
+            <Button type="submit" className="w-full py-3 text-sm font-bold shadow-lg shadow-blue-500/20">
+              Access Portal <ArrowRight className="w-4 h-4 ml-1" />
             </Button>
           </form>
+
+          <div className="mt-8 pt-6 border-t border-slate-100">
+             <button 
+               onClick={() => setShowHelp(!showHelp)}
+               className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest hover:text-blue-600 transition-colors mx-auto"
+             >
+               <Key className="w-3 h-3" /> {showHelp ? 'Hide Login Guide' : 'Need Login Help?'}
+             </button>
+             
+             {showHelp && (
+               <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-3 animate-fade-in">
+                  <div className="flex gap-2">
+                    <Info className="w-4 h-4 text-blue-500 shrink-0" />
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">System Default Credentials</p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 text-[11px]">
+                     <div className="flex justify-between p-2 bg-white rounded border border-slate-100">
+                       <span className="text-slate-400">Schools:</span>
+                       <span className="font-bold text-slate-700">school@def</span>
+                     </div>
+                     <div className="flex justify-between p-2 bg-white rounded border border-slate-100">
+                       <span className="text-slate-400">Admin:</span>
+                       <span className="font-bold text-slate-700">admin@def.org / admin@123</span>
+                     </div>
+                     <div className="flex justify-between p-2 bg-white rounded border border-slate-100">
+                       <span className="text-slate-400">Finance:</span>
+                       <span className="font-bold text-slate-700">finance@def.org / finance@123</span>
+                     </div>
+                  </div>
+               </div>
+             )}
+          </div>
         </div>
-        <div className="bg-gray-50 p-4 text-center border-t border-gray-100">
-          <p className="text-xs text-gray-400">
-            &copy; {new Date().getFullYear()} Darshan Education Foundation
+        
+        <div className="bg-slate-50/50 p-4 text-center border-t border-gray-100">
+          <p className="text-[10px] text-gray-400 font-medium tracking-wide">
+            &copy; {new Date().getFullYear()} DARSHAN EDUCATION FOUNDATION - WORKFLOW v2.0
           </p>
         </div>
       </Card>
