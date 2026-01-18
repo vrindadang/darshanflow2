@@ -1,9 +1,9 @@
 
-import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
 import { ExpenseRequest, User, Role, RequestStatus, BudgetMap, QuarterlyBudget, BudgetLog, BudgetRequest } from './types.ts';
 import { MOCK_REQUESTS, SCHOOLS, INITIAL_BUDGETS, CATEGORIES } from './constants.ts';
 import { mongoDB } from './db.ts';
-import { Loader2, Database, ShieldCheck } from 'lucide-react';
+import { Loader2, ShieldCheck } from 'lucide-react';
 
 interface BudgetStats {
   budget: number;
@@ -31,12 +31,14 @@ interface AppContextType {
   budgetLogs: BudgetLog[];
   addBudgetLog: (log: Omit<BudgetLog, 'id' | 'timestamp'>) => void;
   isHydrated: boolean;
+  lastSync: Date;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isHydrated, setIsHydrated] = useState(false);
+  const [lastSync, setLastSync] = useState(new Date());
   const [user, setUser] = useState<User | null>(null);
   const [requests, setRequests] = useState<ExpenseRequest[]>([]);
   const [budgets, setBudgets] = useState<BudgetMap>(INITIAL_BUDGETS);
@@ -44,46 +46,55 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [budgetLogs, setBudgetLogs] = useState<BudgetLog[]>([]);
   const [selectedRequest, setSelectedRequest] = useState<ExpenseRequest | null>(null);
 
+  // Reusable refresh logic for background sync
+  const refreshData = useCallback(async (isInitial = false) => {
+    try {
+      const [requestsRes, budgetRequestsRes, budgetLogsRes, budgetsRes] = await Promise.all([
+        mongoDB.find('requests'),
+        mongoDB.find('budgetRequests'),
+        mongoDB.find('budgetLogs'),
+        mongoDB.find('budgets')
+      ]);
+      
+      if (requestsRes.documents?.length > 0) {
+        setRequests(requestsRes.documents.sort((a: any, b: any) => 
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        ));
+      } else if (isInitial) {
+        setRequests(MOCK_REQUESTS);
+        if (mongoDB.isLive) await mongoDB.bulkPut('requests', MOCK_REQUESTS);
+      }
+
+      setBudgetRequests(budgetRequestsRes.documents || []);
+      setBudgetLogs((budgetLogsRes.documents || []).sort((a: any, b: any) => 
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      ));
+
+      if (budgetsRes.documents?.length > 0) {
+        const budgetMap: BudgetMap = {};
+        budgetsRes.documents.forEach((b: any) => { budgetMap[b.id] = b.data; });
+        setBudgets(budgetMap);
+      } else if (isInitial) {
+        if (mongoDB.isLive) {
+          const budgetEntries = Object.entries(INITIAL_BUDGETS).map(([id, data]) => ({ id, data }));
+          await mongoDB.bulkPut('budgets', budgetEntries);
+        }
+      }
+      setLastSync(new Date());
+    } catch (error) {
+      console.error("Sync failed:", error);
+    }
+  }, []);
+
   // Initial Hydration
   useEffect(() => {
     const hydrate = async () => {
       try {
-        const [sessionRes, requestsRes, budgetRequestsRes, budgetLogsRes, budgetsRes] = await Promise.all([
-          mongoDB.find('session', { id: 'current_user' }),
-          mongoDB.find('requests'),
-          mongoDB.find('budgetRequests'),
-          mongoDB.find('budgetLogs'),
-          mongoDB.find('budgets')
-        ]);
-
+        const sessionRes = await mongoDB.find('session', { id: 'current_user' });
         if (sessionRes.documents?.[0]?.user) {
           setUser(sessionRes.documents[0].user);
         }
-        
-        if (requestsRes.documents?.length > 0) {
-          setRequests(requestsRes.documents.sort((a: any, b: any) => 
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          ));
-        } else {
-          setRequests(MOCK_REQUESTS);
-          if (mongoDB.isLive) await mongoDB.bulkPut('requests', MOCK_REQUESTS);
-        }
-
-        setBudgetRequests(budgetRequestsRes.documents || []);
-        setBudgetLogs((budgetLogsRes.documents || []).sort((a: any, b: any) => 
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        ));
-
-        if (budgetsRes.documents?.length > 0) {
-          const budgetMap: BudgetMap = {};
-          budgetsRes.documents.forEach((b: any) => { budgetMap[b.id] = b.data; });
-          setBudgets(budgetMap);
-        } else {
-          if (mongoDB.isLive) {
-            const budgetEntries = Object.entries(INITIAL_BUDGETS).map(([id, data]) => ({ id, data }));
-            await mongoDB.bulkPut('budgets', budgetEntries);
-          }
-        }
+        await refreshData(true);
       } catch (error) {
         console.error("Hydration failed", error);
       } finally {
@@ -91,7 +102,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     };
     hydrate();
-  }, []);
+  }, [refreshData]);
+
+  // Background Sync Engine (Polls every 15 seconds)
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(() => {
+      refreshData();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [user, refreshData]);
 
   const login = async (newUser: User) => {
     setUser(newUser);
@@ -293,7 +313,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       selectedRequest, setSelectedRequest,
       budgets, updateBudget, getBudgetStats, getQuarter,
       budgetRequests, addBudgetRequest, processBudgetRequest,
-      budgetLogs, addBudgetLog, isHydrated
+      budgetLogs, addBudgetLog, isHydrated, lastSync
     }}>
       {children}
     </AppContext.Provider>

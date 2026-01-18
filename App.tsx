@@ -6,12 +6,12 @@ import Requestor from './views/Requestor.tsx';
 import Approver from './views/Approver.tsx';
 import Finance from './views/Finance.tsx';
 import { Role } from './types.ts';
-import { BookOpen, LogOut, User as UserIcon, Bell, X, Download, Upload, Check, AlertCircle, Database, Globe, HelpCircle, FileJson, RefreshCw, Layers, Server } from 'lucide-react';
+import { BookOpen, LogOut, User as UserIcon, Bell, X, Download, Upload, Check, AlertCircle, Database, Globe, HelpCircle, FileJson, RefreshCw, Layers, Server, Activity } from 'lucide-react';
 import { cn, Card, Button, Input, Label } from './components/ui.tsx';
 import { mongoDB } from './db.ts';
 
 const MainLayout: React.FC = () => {
-  const { user, logout } = useApp();
+  const { user, logout, lastSync } = useApp();
   const [showDataMenu, setShowDataMenu] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -70,12 +70,17 @@ const MainLayout: React.FC = () => {
                     </p>
                     <span className="text-gray-300">|</span>
                     {mongoDB.isLive ? (
-                      <span className={cn(
-                        "flex items-center gap-1 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border",
-                        mongoDB.mode === 'SUPABASE' ? "text-emerald-600 bg-emerald-50 border-emerald-100" : "text-blue-600 bg-blue-50 border-blue-100"
-                      )}>
-                        <Globe className="w-2.5 h-2.5" /> {mongoDB.mode} Cloud
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={cn(
+                          "flex items-center gap-1 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border",
+                          mongoDB.mode === 'SUPABASE' ? "text-emerald-600 bg-emerald-50 border-emerald-100" : "text-blue-600 bg-blue-50 border-blue-100"
+                        )}>
+                          <Globe className="w-2.5 h-2.5" /> {mongoDB.mode} Cloud
+                        </span>
+                        <div className="flex items-center gap-1 text-[8px] text-slate-400 font-bold uppercase tracking-tighter">
+                          <Activity className="w-2 h-2 text-emerald-500 animate-pulse" /> Live Syncing
+                        </div>
+                      </div>
                     ) : (
                       <button 
                         onClick={() => setShowDataMenu(true)}
@@ -89,6 +94,10 @@ const MainLayout: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-3">
+              <div className="hidden sm:flex flex-col items-end mr-2">
+                 <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Last Synced</span>
+                 <span className="text-[10px] font-medium text-slate-600">{lastSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+              </div>
               <button onClick={() => setShowDataMenu(true)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors">
                 <RefreshCw className="w-5 h-5" />
               </button>
@@ -131,7 +140,7 @@ const MainLayout: React.FC = () => {
                       {mongoDB.mode === 'SUPABASE' && <Check className="w-4 h-4 text-emerald-600" />}
                     </div>
                     <span className="font-bold text-slate-900">Supabase</span>
-                    <span className="text-[10px] text-slate-500">Professional SQL database. Easier setup than Mongo.</span>
+                    <span className="text-[10px] text-slate-500">Professional SQL database. Synchronized across all users.</span>
                   </div>
                   <div className={cn("p-4 rounded-xl border flex flex-col gap-2 transition-all", mongoDB.mode === 'MONGODB' ? "bg-blue-50 border-blue-200 ring-2 ring-blue-500/20" : "bg-slate-50 border-slate-200 opacity-60")}>
                     <div className="flex justify-between">
