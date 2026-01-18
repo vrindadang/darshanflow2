@@ -2,21 +2,22 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../store.tsx';
 import { RequestStatus, QuarterlyBudget } from '../types.ts';
-import { BUDGET_GROUPS, CATEGORIES, SESSIONS } from '../constants.ts';
+import { BUDGET_GROUPS, CATEGORIES, SESSIONS, EXPENSE_POLICIES } from '../constants.ts';
 import { Card, Button, Input, Select, Label, Badge, formatCurrency, cn, StatCard } from '../components/ui.tsx';
 import { 
   PlusCircle, XCircle, FileText, PieChart, Eye, Sparkles, Loader2, 
-  Clock, CheckCircle2, XCircle as XCircleIcon, Landmark, Search, History, LayoutDashboard
+  Clock, CheckCircle2, XCircle as XCircleIcon, Landmark, Search, History, LayoutDashboard, ShieldCheck, Info, ChevronRight, FileCheck
 } from 'lucide-react';
 import { enhanceDescription } from '../lib/gemini.ts';
 
 const Requestor: React.FC = () => {
   const { user, requests, addRequest, selectedRequest, setSelectedRequest, getQuarter, budgets } = useApp();
   
-  const [mainView, setMainView] = useState<'requests' | 'budgets'>('requests');
+  const [mainView, setMainView] = useState<'requests' | 'budgets' | 'policies'>('requests');
   const [subView, setSubView] = useState<'dashboard' | 'new' | 'history'>('dashboard');
   const [budgetSession, setBudgetSession] = useState(SESSIONS[0]);
   const [isEnhancing, setIsEnhancing] = useState(false);
+  const [policySearch, setPolicySearch] = useState('');
   
   // Filtering & Searching
   const [searchQuery, setSearchQuery] = useState('');
@@ -52,6 +53,14 @@ const Requestor: React.FC = () => {
     
     return list;
   }, [requests, user, searchQuery, filterCategory, filterStatus]);
+
+  const filteredPolicies = useMemo(() => {
+    if (!policySearch) return EXPENSE_POLICIES;
+    return EXPENSE_POLICIES.filter(p => 
+      p.group.toLowerCase().includes(policySearch.toLowerCase()) ||
+      p.rules.some(r => r.toLowerCase().includes(policySearch.toLowerCase()))
+    );
+  }, [policySearch]);
 
   const stats = useMemo(() => {
     const userReqs = requests.filter(r => r.schoolId === user?.schoolId);
@@ -121,7 +130,27 @@ const Requestor: React.FC = () => {
           >
             <PieChart className="w-5 h-5" /> Fund Tracking
           </button>
+          <button 
+            onClick={() => setMainView('policies')} 
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all", 
+              mainView === 'policies' ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-50"
+            )}
+          >
+            <ShieldCheck className="w-5 h-5" /> Admin Policy
+          </button>
         </Card>
+
+        {/* Quick Tips or Policy Snippet */}
+        <div className="bg-amber-50 rounded-2xl p-6 border border-amber-100/50 shadow-sm">
+           <div className="flex items-center gap-2 mb-3">
+              <div className="p-1.5 bg-amber-100 rounded-lg"><Info className="w-4 h-4 text-amber-600" /></div>
+              <h4 className="text-xs font-bold text-amber-800 uppercase tracking-widest">Filing Tip</h4>
+           </div>
+           <p className="text-xs text-amber-700 leading-relaxed font-medium">
+             Always attach supporting GST invoices for any activity expenditure exceeding ₹15,000 to ensure fast disbursement.
+           </p>
+        </div>
       </div>
 
       <div className="flex-1 space-y-8">
@@ -151,7 +180,6 @@ const Requestor: React.FC = () => {
 
             {subView === 'dashboard' && (
               <div className="space-y-8">
-                {/* Stats Grid - MATCHES SCREENSHOT */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   <StatCard 
                     title="Pending" 
@@ -183,7 +211,6 @@ const Requestor: React.FC = () => {
                   />
                 </div>
 
-                {/* Recent Requests Table Section - MATCHES SCREENSHOT */}
                 <Card className="p-0 overflow-hidden">
                   <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-4">
                     <h3 className="text-xl font-bold text-slate-900">Recent Requests</h3>
@@ -206,33 +233,9 @@ const Requestor: React.FC = () => {
                       <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[11px] tracking-wider border-b border-slate-100">
                         <tr>
                           <th className="px-6 py-4">ID</th>
-                          <th className="px-6 py-4">
-                            <div className="flex flex-col gap-1.5">
-                              <span>Category</span>
-                              <Select 
-                                value={filterCategory} 
-                                onChange={(e) => setFilterCategory(e.target.value)}
-                                className="w-32 bg-white"
-                              >
-                                <option value="All">All</option>
-                                {CATEGORIES.slice(0, 10).map(c => <option key={c} value={c}>{c}</option>)}
-                              </Select>
-                            </div>
-                          </th>
+                          <th className="px-6 py-4">Category</th>
                           <th className="px-6 py-4">Amount</th>
-                          <th className="px-6 py-4">
-                            <div className="flex flex-col gap-1.5">
-                              <span>Status</span>
-                              <Select 
-                                value={filterStatus} 
-                                onChange={(e) => setFilterStatus(e.target.value)}
-                                className="w-24 bg-white"
-                              >
-                                <option value="All">All</option>
-                                {Object.values(RequestStatus).map(s => <option key={s} value={s}>{s}</option>)}
-                              </Select>
-                            </div>
-                          </th>
+                          <th className="px-6 py-4">Status</th>
                           <th className="px-6 py-4">Date</th>
                           <th className="px-6 py-4 text-center">Action</th>
                         </tr>
@@ -249,23 +252,12 @@ const Requestor: React.FC = () => {
                               <button 
                                 onClick={() => setSelectedRequest(req)} 
                                 className="p-2 hover:bg-blue-50 rounded-xl text-blue-600 transition-all inline-flex items-center"
-                                title="View Details"
                               >
                                 <Eye className="w-4 h-4" />
                               </button>
                             </td>
                           </tr>
                         ))}
-                        {myRequests.length === 0 && (
-                          <tr>
-                            <td colSpan={6} className="px-6 py-12 text-center">
-                              <div className="flex flex-col items-center justify-center text-slate-400">
-                                <History className="w-12 h-12 mb-2 opacity-20" />
-                                <p className="text-sm font-medium">No requests found.</p>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
                       </tbody>
                     </table>
                   </div>
@@ -472,6 +464,82 @@ const Requestor: React.FC = () => {
                  </table>
               </div>
            </Card>
+        )}
+
+        {mainView === 'policies' && (
+          <div className="space-y-8 animate-fade-in">
+             <div className="flex justify-between items-center">
+               <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-3">
+                 <ShieldCheck className="w-8 h-8 text-blue-600" />
+                 Foundation Financial Policies
+               </h2>
+               <div className="relative w-64">
+                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                 <Input 
+                   placeholder="Search policies..." 
+                   className="pl-9 h-10 rounded-xl"
+                   value={policySearch}
+                   onChange={(e) => setPolicySearch(e.target.value)}
+                 />
+               </div>
+             </div>
+
+             <div className="grid grid-cols-1 gap-6">
+                {filteredPolicies.map((p, idx) => (
+                   <Card key={idx} className="p-0 overflow-hidden border-none shadow-md hover:shadow-lg transition-all ring-1 ring-slate-100">
+                      <div className="bg-white p-6 border-b border-slate-50 flex items-center gap-4">
+                         <div className="h-12 w-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600">
+                            <FileCheck className="w-6 h-6" />
+                         </div>
+                         <div>
+                            <h3 className="font-bold text-slate-900 text-lg leading-none">{p.group}</h3>
+                            <p className="text-slate-500 text-xs mt-2 font-medium">{p.description}</p>
+                         </div>
+                      </div>
+                      <div className="p-6 bg-slate-50/50 space-y-4">
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {p.rules.map((rule, ridx) => (
+                               <div key={ridx} className="flex gap-3 items-start bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+                                  <ChevronRight className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+                                  <p className="text-xs text-slate-600 font-medium leading-relaxed">{rule}</p>
+                               </div>
+                            ))}
+                         </div>
+                         <div className="mt-4 p-4 bg-rose-50 rounded-xl border border-rose-100 flex items-center gap-3">
+                            <div className="bg-rose-500 text-white p-1 rounded-lg"><Landmark className="w-4 h-4" /></div>
+                            <p className="text-xs font-bold text-rose-800">{p.limit}</p>
+                         </div>
+                      </div>
+                   </Card>
+                ))}
+                {filteredPolicies.length === 0 && (
+                   <div className="p-20 text-center text-slate-400">
+                      <Search className="w-12 h-12 mx-auto mb-4 opacity-10" />
+                      <p className="font-bold">No policies matching your search.</p>
+                   </div>
+                )}
+             </div>
+
+             <Card className="p-8 bg-blue-900 text-white border-none relative overflow-hidden">
+                <div className="relative z-10 space-y-4">
+                   <h3 className="text-xl font-bold">Standard Operating Procedure (SOP)</h3>
+                   <p className="text-blue-100 text-sm max-w-2xl leading-relaxed">
+                     All fund requisitions are subject to audit by the Head Office. Any deviation from the above policies requires a written justification in the "Description" field during submission.
+                   </p>
+                   <div className="flex gap-4 pt-2">
+                      <div className="flex items-center gap-2 text-xs font-bold bg-white/10 px-3 py-1.5 rounded-lg border border-white/20">
+                         <FileText className="w-4 h-4" /> Annexure 4-B
+                      </div>
+                      <div className="flex items-center gap-2 text-xs font-bold bg-white/10 px-3 py-1.5 rounded-lg border border-white/20">
+                         <FileText className="w-4 h-4" /> Financial Guidelines 2024
+                      </div>
+                   </div>
+                </div>
+                <div className="absolute -right-12 -bottom-12 opacity-10">
+                   <ShieldCheck className="w-64 h-64 text-white" />
+                </div>
+             </Card>
+          </div>
         )}
       </div>
 

@@ -1,3 +1,4 @@
+
 import { RequestStatus, ExpenseRequest, School, BudgetMap } from './types.ts';
 
 const LOCATIONS = [
@@ -73,6 +74,63 @@ export const BUDGET_GROUPS = [
       'New Touch Panel', 'New Smart Board', 'Printer (Capital)', 
       'Vehicle A/c New Vehicle', 'Library Books (Capital)'
     ]
+  }
+];
+
+export const EXPENSE_POLICIES = [
+  {
+    group: 'A. ESTABLISHMENT EXPENSES',
+    description: 'Guidelines for core operating and staffing costs.',
+    rules: [
+      'Salary and ESI/PF payments must be supported by bank-verified attendance logs.',
+      'Generator Diesel purchases > 200 Liters require HOD pre-approval.',
+      'AMC contracts must be reviewed annually by the Head Office technical team.',
+      'Gratuity and EL-encashment require specific board resolution copies attached.'
+    ],
+    limit: 'Threshold: Approval required for Teacher/Coach charges exceeding ₹25,000/month.'
+  },
+  {
+    group: 'B. ACTIVITY EXPENSES',
+    description: 'Co-curricular and student development activities.',
+    rules: [
+      'School trip requisitions must be submitted 21 days in advance with route plan.',
+      'Scholarships require a list of students with their merit/income certificates.',
+      'Sports and Lab consumables must be entered into the central stock register first.',
+      'Workshops require a Feedback Report from the principal post-completion.'
+    ],
+    limit: 'Threshold: Activity materials > ₹15,000 require 3 competitive vendor quotes.'
+  },
+  {
+    group: 'C. CONTINGENCY EXPENSES',
+    description: 'Day-to-day administrative and utility expenses.',
+    rules: [
+      'Electricity and Water bills should be uploaded as PDF with previous month comparison.',
+      'Vehicle hire charges must follow the foundation-approved KM rates.',
+      'Admission drive expenses require a budget plan approved by the Marketing Cell.',
+      'Office stationery must be ordered quarterly to optimize bulk discount rates.'
+    ],
+    limit: 'Threshold: Any advertisement/publicity > ₹5,000 requires HO Creative Desk approval.'
+  },
+  {
+    group: 'D. REPAIRS & RENEWALS',
+    description: 'Maintenance of school assets and infrastructure.',
+    rules: [
+      'Furniture and building repairs must include "Before" and "After" photographs.',
+      'CCTV and Computer repairs require a "Beyond Economic Repair" certificate for replacement.',
+      'Work must be certified by the School Site Supervisor before fund release.'
+    ],
+    limit: 'Threshold: Repairs exceeding ₹10,000 require a technical audit by HO Engg. team.'
+  },
+  {
+    group: 'F. CAPITALIST EXPENSES',
+    description: 'High-value investments and asset building.',
+    rules: [
+      'New construction requires a BOQ (Bill of Quantities) vetted by the Finance Committee.',
+      'IT hardware (PC/Smart Boards) must follow the standard Foundation hardware spec.',
+      'Vehicles must be registered in the name of Darshan Education Foundation.',
+      'Asset Tagging is mandatory within 48 hours of purchase.'
+    ],
+    limit: 'Threshold: All capital expenditures require MANDATORY approval from the Secretary.'
   }
 ];
 
