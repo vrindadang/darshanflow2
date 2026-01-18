@@ -1,4 +1,4 @@
-import { RequestStatus, ExpenseRequest, School, BudgetMap } from './types';
+import { RequestStatus, ExpenseRequest, School, BudgetMap } from './types.ts';
 
 const LOCATIONS = [
   '5th Mile', 'Ambala', 'Amritsar', 'Bigas', 'Bhubaneswar', 'Dasuya', 'Delhi', 'Devlali', 
@@ -84,8 +84,78 @@ export const INITIAL_BUDGETS: BudgetMap = {};
 SCHOOLS.forEach(school => {
   INITIAL_BUDGETS[school.id] = {};
   CATEGORIES.forEach(cat => {
-    INITIAL_BUDGETS[school.id][cat] = { q1: 50000, q2: 50000, q3: 50000, q4: 50000 };
+    INITIAL_BUDGETS[school.id][cat] = { q1: 75000, q2: 75000, q3: 75000, q4: 75000 };
   });
 });
 
-export const MOCK_REQUESTS: ExpenseRequest[] = [];
+export const MOCK_REQUESTS: ExpenseRequest[] = [
+  {
+    id: 'DA5TH/2024-25/1001',
+    schoolId: 'school-1',
+    schoolName: 'Darshan Academy, 5th Mile',
+    category: 'Educational Workshops & Seminars',
+    description: 'Faculty development program for senior wing teachers on new CBSE guidelines.',
+    amount: 15500,
+    status: RequestStatus.PENDING,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    session: '2024-25',
+    expenseDate: '2024-05-15'
+  },
+  {
+    id: 'DAAMB/2024-25/1002',
+    schoolId: 'school-2',
+    schoolName: 'Darshan Academy, Ambala',
+    category: 'Salary & Wages',
+    description: 'Arrears for supporting staff for the month of April.',
+    amount: 42000,
+    status: RequestStatus.APPROVED,
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
+    updatedAt: new Date().toISOString(),
+    approverComments: 'Verified with payroll sheet. Approved.',
+    session: '2024-25',
+    expenseDate: '2024-05-10'
+  },
+  {
+    id: 'DAAMR/2024-25/1003',
+    schoolId: 'school-3',
+    schoolName: 'Darshan Academy, Amritsar',
+    category: 'Electricity Charges',
+    description: 'Monthly electricity bill for the main campus building.',
+    amount: 12800,
+    status: RequestStatus.DISBURSED,
+    createdAt: new Date(Date.now() - 172800000).toISOString(),
+    updatedAt: new Date(Date.now() - 43200000).toISOString(),
+    approverComments: 'Regular monthly expense.',
+    financeComments: 'UTR: PAY_AMR_9928172',
+    session: '2024-25',
+    expenseDate: '2024-05-02'
+  },
+  {
+    id: 'DADEL/2024-25/1004',
+    schoolId: 'school-7',
+    schoolName: 'Darshan Academy, Delhi',
+    category: 'Annual Day',
+    description: 'Advance payment for auditorium booking and stage lighting.',
+    amount: 50000,
+    status: RequestStatus.REJECTED,
+    createdAt: new Date(Date.now() - 259200000).toISOString(),
+    updatedAt: new Date(Date.now() - 86400000).toISOString(),
+    approverComments: 'Please provide quotation from at least two more vendors.',
+    session: '2024-25',
+    expenseDate: '2024-06-20'
+  },
+  {
+    id: 'DAPUN/2024-25/1005',
+    schoolId: 'school-20',
+    schoolName: 'Darshan Academy, Pune',
+    category: 'Building Repairs/Sanitary Repair',
+    description: 'Emergency plumbing repairs in the primary block washrooms.',
+    amount: 8400,
+    status: RequestStatus.PENDING,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    session: '2024-25',
+    expenseDate: '2024-05-21'
+  }
+];
