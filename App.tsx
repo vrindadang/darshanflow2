@@ -1,12 +1,12 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { AppProvider, useApp } from './store.tsx';
 import Login from './views/Login.tsx';
 import Requestor from './views/Requestor.tsx';
 import Approver from './views/Approver.tsx';
 import Finance from './views/Finance.tsx';
-import { Role } from './types.ts';
-import { LogOut, User as UserIcon, X, Download, Upload, Check, AlertCircle, Database, Globe, RefreshCw, Layers, Terminal, Info, Loader2 } from 'lucide-react';
+import { Role, RequestStatus } from './types.ts';
+import { LogOut, User as UserIcon, X, Download, Upload, Check, AlertCircle, Database, Globe, RefreshCw, Layers, Terminal, Info, Loader2, Bell, CheckCheck, Clock } from 'lucide-react';
 import { cn, Card, Button, Input } from './components/ui.tsx';
 import { mongoDB, ConnectionStatus } from './db.ts';
 import Logo from './components/Logo.tsx';
@@ -63,19 +63,141 @@ CREATE TABLE IF NOT EXISTS budgetRequests (
   "adminComments" TEXT
 );
 
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  "userId" TEXT,
+  role TEXT,
+  "schoolId" TEXT,
+  message TEXT,
+  type TEXT,
+  timestamp TIMESTAMPTZ DEFAULT NOW(),
+  read BOOLEAN DEFAULT FALSE,
+  "requestId" TEXT
+);
+
 ALTER TABLE requests DISABLE ROW LEVEL SECURITY;
 ALTER TABLE budgets DISABLE ROW LEVEL SECURITY;
 ALTER TABLE budgetLogs DISABLE ROW LEVEL SECURITY;
-ALTER TABLE budgetRequests DISABLE ROW LEVEL SECURITY;`;
+ALTER TABLE budgetRequests DISABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications DISABLE ROW LEVEL SECURITY;`;
+
+const NotificationDropdown: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const { notifications, markNotificationAsRead, markAllNotificationsAsRead, user, setSelectedRequest, requests } = useApp();
+  
+  const filteredNotifications = useMemo(() => {
+    if (!user) return [];
+    return notifications.filter(n => {
+      if (n.role && n.role === user.role) return true;
+      if (n.schoolId && n.schoolId === user.schoolId) return true;
+      if (n.userId && n.userId === user.id) return true;
+      return false;
+    });
+  }, [notifications, user]);
+
+  const unreadCount = filteredNotifications.filter(n => !n.read).length;
+
+  const handleNotificationClick = (n: any) => {
+    markNotificationAsRead(n.id);
+    if (n.requestId) {
+      const req = requests.find(r => r.id === n.requestId);
+      if (req) setSelectedRequest(req);
+    }
+    onClose();
+  };
+
+  return (
+    <div className="absolute right-0 mt-3 w-80 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50 animate-fade-in ring-1 ring-slate-900/5">
+      <div className="p-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+        <div>
+           <h3 className="text-sm font-bold text-slate-900 leading-none">Activity Feed</h3>
+           {unreadCount > 0 && <p className="text-[10px] text-blue-600 font-bold mt-1 uppercase tracking-wider">{unreadCount} New Progress Alerts</p>}
+        </div>
+        {unreadCount > 0 && (
+          <button onClick={markAllNotificationsAsRead} className="text-[10px] text-slate-400 font-bold uppercase hover:text-blue-600 transition-colors">Mark all read</button>
+        )}
+      </div>
+      <div className="max-h-[400px] overflow-y-auto divide-y divide-slate-50">
+        {filteredNotifications.length > 0 ? (
+          filteredNotifications.map(n => (
+            <div 
+              key={n.id} 
+              onClick={() => handleNotificationClick(n)}
+              className={cn(
+                "p-4 hover:bg-slate-50 cursor-pointer transition-colors relative group",
+                !n.read ? "bg-blue-50/30" : ""
+              )}
+            >
+              {!n.read && <div className="absolute left-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 bg-blue-600 rounded-full"></div>}
+              <div className="flex gap-3">
+                 <div className={cn(
+                   "p-2 rounded-lg shrink-0",
+                   n.type === 'success' ? "bg-emerald-100 text-emerald-600" : 
+                   n.type === 'error' ? "bg-rose-100 text-rose-600" : 
+                   "bg-blue-100 text-blue-600"
+                 )}>
+                   {n.type === 'success' ? <CheckCheck className="w-4 h-4" /> : <Info className="w-4 h-4" />}
+                 </div>
+                 <div className="flex-1 min-w-0">
+                    <p className={cn("text-xs leading-relaxed", !n.read ? "font-bold text-slate-900" : "text-slate-600")}>
+                      {n.message}
+                    </p>
+                    <div className="flex items-center gap-1.5 mt-1">
+                       <Clock className="w-3 h-3 text-slate-400" />
+                       <span className="text-[10px] text-slate-400 font-medium">
+                         {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                       </span>
+                    </div>
+                 </div>
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="p-10 text-center space-y-2">
+            <Bell className="w-8 h-8 text-slate-200 mx-auto" />
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Quiet for now</p>
+          </div>
+        )}
+      </div>
+      <div className="p-3 bg-slate-50 border-t border-slate-100 text-center">
+         <button onClick={onClose} className="text-[10px] font-bold text-slate-400 uppercase hover:text-slate-600">Close Notifications</button>
+      </div>
+    </div>
+  );
+};
 
 const MainLayout: React.FC = () => {
-  const { user, logout, lastSync } = useApp();
+  const { user, logout, lastSync, notifications } = useApp();
   const [showDataMenu, setShowDataMenu] = useState(false);
   const [showSqlSetup, setShowSqlSetup] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const [diag, setDiag] = useState<ConnectionStatus | null>(mongoDB.lastStatus);
   const [isTesting, setIsTesting] = useState(false);
   const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const notifRef = useRef<HTMLDivElement>(null);
+
+  const runTest = async () => {
+    setIsTesting(true);
+    try {
+      const result = await mongoDB.testConnection();
+      setDiag(result);
+    } catch (e) {
+      console.error("Connection test failed:", e);
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const unreadCount = useMemo(() => {
+    if (!user) return 0;
+    return notifications.filter(n => {
+      if (n.read) return false;
+      if (n.role && n.role === user.role) return true;
+      if (n.schoolId && n.schoolId === user.schoolId) return true;
+      if (n.userId && n.userId === user.id) return true;
+      return false;
+    }).length;
+  }, [notifications, user]);
 
   useEffect(() => { runTest(); }, []);
   useEffect(() => { if (showDataMenu) runTest(); }, [showDataMenu]);
@@ -84,12 +206,15 @@ const MainLayout: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const runTest = async () => {
-    setIsTesting(true);
-    const result = await mongoDB.testConnection();
-    setDiag(result);
-    setIsTesting(false);
-  };
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
+        setShowNotifications(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   if (!user) return <Login />;
 
@@ -168,6 +293,25 @@ const MainLayout: React.FC = () => {
                  <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest leading-none">Last Synced</span>
                  <span className="text-[10px] font-bold text-slate-600 mt-1">{lastSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               </div>
+              
+              <div className="relative" ref={notifRef}>
+                <button 
+                  onClick={() => setShowNotifications(!showNotifications)}
+                  className={cn(
+                    "p-2.5 rounded-2xl transition-all relative",
+                    unreadCount > 0 ? "bg-blue-50 text-blue-600 shadow-sm" : "text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                  )}
+                >
+                  <Bell className="w-5 h-5" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center bg-rose-600 text-white text-[9px] font-black rounded-full border-2 border-white px-1">
+                      {unreadCount}
+                    </span>
+                  )}
+                </button>
+                {showNotifications && <NotificationDropdown onClose={() => setShowNotifications(false)} />}
+              </div>
+
               <button onClick={() => setShowDataMenu(true)} className="p-2.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-all"><RefreshCw className="w-5 h-5" /></button>
               <div className="h-8 w-px bg-gray-200 mx-1"></div>
               <div className="flex items-center gap-2.5 px-4 py-2 bg-slate-50 rounded-2xl border border-slate-200 shadow-sm">

@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
-import { ExpenseRequest, User, Role, RequestStatus, BudgetMap, QuarterlyBudget, BudgetLog, BudgetRequest } from './types.ts';
+import { ExpenseRequest, User, Role, RequestStatus, BudgetMap, QuarterlyBudget, BudgetLog, BudgetRequest, Notification } from './types.ts';
 import { MOCK_REQUESTS, SCHOOLS, INITIAL_BUDGETS, CATEGORIES } from './constants.ts';
 import { mongoDB } from './db.ts';
 import { Loader2 } from 'lucide-react';
@@ -20,6 +20,8 @@ interface AppContextType {
   updateUserProfile: (name: string, password?: string) => void;
   requests: ExpenseRequest[];
   addRequest: (req: Omit<ExpenseRequest, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => void;
+  modifyRequest: (id: string, updates: Partial<ExpenseRequest>) => void;
+  cancelRequest: (id: string) => void;
   updateRequestStatus: (id: string, status: RequestStatus, comments: string) => void;
   selectedRequest: ExpenseRequest | null;
   setSelectedRequest: (req: ExpenseRequest | null) => void;
@@ -28,10 +30,14 @@ interface AppContextType {
   getBudgetStats: (schoolId: string, category: string, dateStr?: string, session?: string) => BudgetStats;
   getQuarter: (dateStr: string) => keyof QuarterlyBudget;
   budgetRequests: BudgetRequest[];
-  addBudgetRequest: (req: Omit<BudgetRequest, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => void;
+  saveBudgetDraft: (req: Omit<BudgetRequest, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => Promise<void>;
+  submitBudgetRequest: (id: string) => Promise<void>;
   processBudgetRequest: (id: string, status: 'APPROVED' | 'REJECTED', comments: string, approvedData?: Record<string, QuarterlyBudget>) => void;
   budgetLogs: BudgetLog[];
   addBudgetLog: (log: Omit<BudgetLog, 'id' | 'timestamp'>) => void;
+  notifications: Notification[];
+  markNotificationAsRead: (id: string) => void;
+  markAllNotificationsAsRead: () => void;
   isHydrated: boolean;
   lastSync: Date;
 }
@@ -47,6 +53,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [budgetRequests, setBudgetRequests] = useState<BudgetRequest[]>([]);
   const [budgetLogs, setBudgetLogs] = useState<BudgetLog[]>([]);
   const [selectedRequest, setSelectedRequest] = useState<ExpenseRequest | null>(null);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+
+  const addNotification = useCallback(async (notif: Omit<Notification, 'id' | 'timestamp' | 'read'>) => {
+    const newNotif: Notification = {
+      ...notif,
+      id: Math.random().toString(36).substr(2, 9),
+      timestamp: new Date().toISOString(),
+      read: false
+    };
+    setNotifications(prev => [newNotif, ...prev]);
+    await mongoDB.insertOne('notifications', newNotif);
+  }, []);
 
   const refreshData = useCallback(async (isInitial = false) => {
     try {
@@ -54,11 +72,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         await mongoDB.testConnection();
       }
 
-      const [requestsRes, budgetRequestsRes, budgetLogsRes, budgetsRes] = await Promise.all([
+      const [requestsRes, budgetRequestsRes, budgetLogsRes, budgetsRes, notificationsRes] = await Promise.all([
         mongoDB.find('requests'),
         mongoDB.find('budgetRequests'),
         mongoDB.find('budgetLogs'),
-        mongoDB.find('budgets')
+        mongoDB.find('budgets'),
+        mongoDB.find('notifications')
       ]);
       
       if (requestsRes.documents) {
@@ -95,6 +114,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setBudgetLogs((budgetLogsRes.documents || []).sort((a: any, b: any) => 
         new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
       ));
+
+      if (notificationsRes.documents) {
+        setNotifications((notificationsRes.documents as Notification[]).sort((a, b) => 
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        ));
+      }
 
       if (budgetsRes.documents?.length > 0) {
         const budgetMap: BudgetMap = {};
@@ -170,11 +195,52 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setRequests(prev => [newRequest, ...prev]);
     try {
       await mongoDB.insertOne('requests', newRequest);
+      
+      // Notify Approver Role
+      await addNotification({
+        role: Role.APPROVER,
+        message: `New request ${newId} from ${req.schoolName} for ₹${req.amount}.`,
+        type: 'info',
+        requestId: newId
+      });
+
       const emailDraft = await composeAuditorNotification(newRequest);
       console.log(`[MAIL SERVER] Sending Requisition Alert...`, emailDraft);
     } catch (e) {
       console.error("Storage/Notification failed:", e);
     }
+  };
+
+  const modifyRequest = async (id: string, updates: Partial<ExpenseRequest>) => {
+    const req = requests.find(r => r.id === id);
+    if (!req) return;
+
+    const updated = { ...req, ...updates, updatedAt: new Date().toISOString() };
+    setRequests(prev => prev.map(r => r.id === id ? updated : r));
+    await mongoDB.updateOne('requests', id, updated);
+
+    await addNotification({
+      role: Role.APPROVER,
+      message: `Request ${id} was modified by ${req.schoolName}. Review required.`,
+      type: 'warning',
+      requestId: id
+    });
+  };
+
+  const cancelRequest = async (id: string) => {
+    const req = requests.find(r => r.id === id);
+    if (!req) return;
+
+    const updated = { ...req, status: RequestStatus.CANCELLED, updatedAt: new Date().toISOString() };
+    setRequests(prev => prev.map(r => r.id === id ? updated : r));
+    await mongoDB.updateOne('requests', id, updated);
+
+    await addNotification({
+      role: Role.APPROVER,
+      message: `Request ${id} has been cancelled by ${req.schoolName}.`,
+      type: 'error',
+      requestId: id
+    });
   };
 
   const updateRequestStatus = async (id: string, status: RequestStatus, comments: string) => {
@@ -185,6 +251,52 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (status === RequestStatus.DISBURSED) updated.financeComments = comments;
     setRequests(prev => prev.map(r => r.id === id ? updated : r));
     await mongoDB.updateOne('requests', id, updated);
+
+    // Progressive Notifications
+    if (status === RequestStatus.APPROVED) {
+      await addNotification({
+        role: Role.FINANCE,
+        message: `Request ${id} approved. Ready for disbursement.`,
+        type: 'success',
+        requestId: id
+      });
+      await addNotification({
+        schoolId: req.schoolId,
+        message: `Your request ${id} has been APPROVED by the Head Office.`,
+        type: 'success',
+        requestId: id
+      });
+    } else if (status === RequestStatus.REJECTED) {
+      await addNotification({
+        schoolId: req.schoolId,
+        message: `Your request ${id} was REJECTED. Reason: ${comments.substring(0, 30)}...`,
+        type: 'error',
+        requestId: id
+      });
+    } else if (status === RequestStatus.DISBURSED) {
+      await addNotification({
+        schoolId: req.schoolId,
+        message: `Funds for ${id} have been DISBURSED. Ref: ${comments}`,
+        type: 'info',
+        requestId: id
+      });
+    }
+  };
+
+  const markNotificationAsRead = async (id: string) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    await mongoDB.updateOne('notifications', id, { read: true });
+  };
+
+  const markAllNotificationsAsRead = async () => {
+    // Fixed: changed unreadIds to unreadCount to match the check below
+    const unreadCount = notifications.filter(n => !n.read).length;
+    if (unreadCount === 0) return;
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    const unreadNotifs = notifications.filter(n => !n.read);
+    for (const n of unreadNotifs) {
+      await mongoDB.updateOne('notifications', n.id, { read: true });
+    }
   };
 
   const updateBudget = async (schoolId: string, category: string, quarter: keyof QuarterlyBudget, amount: number) => {
@@ -195,24 +307,60 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     await mongoDB.updateOne('budgets', schoolId, { data: updatedBudgets[schoolId] });
   };
 
-  const addBudgetRequest = async (req: Omit<BudgetRequest, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => {
-    const school = SCHOOLS.find(s => s.id === req.schoolId);
-    const shortCode = school ? school.shortCode : 'DEF';
-    const newRequest: BudgetRequest = {
-      ...req,
-      id: `BP/${shortCode}/${Math.floor(100 + Math.random() * 900)}`,
+  const saveBudgetDraft = async (req: Omit<BudgetRequest, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => {
+    // Check if a draft already exists for this school and session
+    const existing = budgetRequests.find(r => r.schoolId === req.schoolId && r.session === req.session && (r.status === 'DRAFT' || r.status === 'REJECTED'));
+    
+    if (existing) {
+      const updated: BudgetRequest = {
+        ...existing,
+        ...req,
+        status: 'DRAFT',
+        updatedAt: new Date().toISOString()
+      };
+      setBudgetRequests(prev => prev.map(r => r.id === existing.id ? updated : r));
+      await mongoDB.updateOne('budgetRequests', existing.id, updated);
+    } else {
+      const school = SCHOOLS.find(s => s.id === req.schoolId);
+      const shortCode = school ? school.shortCode : 'DEF';
+      const newId = `BP/${shortCode}/${Math.floor(100 + Math.random() * 900)}`;
+      const newRequest: BudgetRequest = {
+        ...req,
+        id: newId,
+        status: 'DRAFT',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      setBudgetRequests(prev => [newRequest, ...prev]);
+      await mongoDB.insertOne('budgetRequests', newRequest);
+    }
+  };
+
+  const submitBudgetRequest = async (id: string) => {
+    const existing = budgetRequests.find(r => r.id === id);
+    if (!existing) return;
+
+    const updated: BudgetRequest = {
+      ...existing,
       status: 'PENDING',
-      createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    setBudgetRequests(prev => [newRequest, ...prev]);
-    await mongoDB.insertOne('budgetRequests', newRequest);
+    
+    setBudgetRequests(prev => prev.map(r => r.id === id ? updated : r));
+    await mongoDB.updateOne('budgetRequests', id, updated);
+
+    await addNotification({
+      role: Role.APPROVER,
+      message: `New Annual Budget Plan received from ${existing.schoolName}.`,
+      type: 'info',
+      requestId: id
+    });
   };
 
   const processBudgetRequest = async (id: string, status: 'APPROVED' | 'REJECTED', comments: string, approvedData?: Record<string, QuarterlyBudget>) => {
     setBudgetRequests(prev => prev.map(req => {
       if (req.id !== id) return req;
-      const updated = { ...req, status, adminComments: comments, updatedAt: new Date().toISOString() };
+      const updated = { ...req, status: status as any, adminComments: comments, updatedAt: new Date().toISOString() };
       mongoDB.updateOne('budgetRequests', id, updated);
       return updated;
     }));
@@ -231,6 +379,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 }
              }
           }
+          await addNotification({
+            schoolId: req.schoolId,
+            message: `Your annual budget plan ${id} has been APPROVED.`,
+            type: 'success',
+            requestId: id
+          });
        }
     }
   };
@@ -256,10 +410,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (dateStr) {
       const quarter = getQuarter(dateStr);
       budget = categoryBudget[quarter];
-      used = requests.filter(r => r.schoolId === schoolId && r.category === category && r.status !== RequestStatus.REJECTED && getQuarter(r.expenseDate) === quarter && (session ? r.session === session : true)).reduce((sum, r) => sum + r.amount, 0);
+      used = requests.filter(r => r.schoolId === schoolId && r.category === category && r.status !== RequestStatus.REJECTED && r.status !== RequestStatus.CANCELLED && getQuarter(r.expenseDate) === quarter && (session ? r.session === session : true)).reduce((sum, r) => sum + r.amount, 0);
     } else {
       budget = categoryBudget.q1 + categoryBudget.q2 + categoryBudget.q3 + categoryBudget.q4;
-      used = requests.filter(r => r.schoolId === schoolId && r.category === category && r.status !== RequestStatus.REJECTED && (session ? r.session === session : true)).reduce((sum, r) => sum + r.amount, 0);
+      used = requests.filter(r => r.schoolId === schoolId && r.category === category && r.status !== RequestStatus.REJECTED && r.status !== RequestStatus.CANCELLED && (session ? r.session === session : true)).reduce((sum, r) => sum + r.amount, 0);
     }
     return { budget, used, remaining: budget - used };
   };
@@ -282,11 +436,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   return (
     <AppContext.Provider value={{ 
       user, login, logout, updateUserProfile,
-      requests, addRequest, updateRequestStatus,
+      requests, addRequest, modifyRequest, cancelRequest, updateRequestStatus,
       selectedRequest, setSelectedRequest,
       budgets, updateBudget, getBudgetStats, getQuarter,
-      budgetRequests, addBudgetRequest, processBudgetRequest,
-      budgetLogs, addBudgetLog, isHydrated, lastSync
+      budgetRequests, saveBudgetDraft, submitBudgetRequest, processBudgetRequest,
+      budgetLogs, addBudgetLog,
+      notifications, markNotificationAsRead, markAllNotificationsAsRead,
+      isHydrated, lastSync
     }}>
       {children}
     </AppContext.Provider>

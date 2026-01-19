@@ -50,7 +50,7 @@ class DataService {
     
     if (this.mode === 'SUPABASE') {
       try {
-        const tables = ['requests', 'budgets', 'budgetLogs', 'budgetRequests'];
+        const tables = ['requests', 'budgets', 'budgetLogs', 'budgetRequests', 'notifications'];
         const missing: string[] = [];
         
         // Parallel check for performance
@@ -211,7 +211,7 @@ class DataService {
   }
 
   exportData() {
-    const collections = ['requests', 'budgetRequests', 'budgetLogs', 'budgets'];
+    const collections = ['requests', 'budgetRequests', 'budgetLogs', 'budgets', 'notifications'];
     const bundle: Record<string, any> = {};
     collections.forEach(c => bundle[c] = JSON.parse(localStorage.getItem(`darshanflow_db_${c}`) || '[]'));
     return JSON.stringify(bundle, null, 2);

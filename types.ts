@@ -11,7 +11,8 @@ export enum RequestStatus {
   PENDING = 'PENDING',
   APPROVED = 'APPROVED',
   REJECTED = 'REJECTED',
-  DISBURSED = 'DISBURSED'
+  DISBURSED = 'DISBURSED',
+  CANCELLED = 'CANCELLED'
 }
 
 export interface User {
@@ -48,6 +49,18 @@ export interface ExpenseRequest {
   exceedsBudgetReason?: string;
 }
 
+export interface Notification {
+  id: string;
+  userId?: string;
+  role?: Role;
+  schoolId?: string;
+  message: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+  timestamp: string;
+  read: boolean;
+  requestId?: string;
+}
+
 export interface QuarterlyBudget {
   q1: number;
   q2: number;
@@ -61,7 +74,7 @@ export interface BudgetRequest {
   schoolName: string;
   session: string;
   data: Record<string, QuarterlyBudget>; // Category -> { q1, q2, q3, q4 }
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  status: 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED';
   createdAt: string;
   updatedAt: string;
   note?: string;
