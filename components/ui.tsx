@@ -80,7 +80,7 @@ export const StatCard: React.FC<{
   <Card className={cn("p-6 flex justify-between items-center border-l-4", borderColor)}>
     <div>
       <p className="text-sm font-semibold text-slate-500 mb-1">{title}</p>
-      <h3 className="text-3xl font-bold text-slate-900">{value}</h3>
+      <h3 className="text-3xl font-bold text-slate-900 tracking-tight">{value}</h3>
     </div>
     <div className={cn("p-3 rounded-full bg-slate-50", iconColor)}>
       <Icon className="w-8 h-8" />
@@ -88,10 +88,24 @@ export const StatCard: React.FC<{
   </Card>
 );
 
+/**
+ * Formats currency using the Indian Number System (en-IN).
+ * Example: 1,00,000 instead of 100,000.
+ */
 export const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
-    maximumFractionDigits: 0
+    maximumFractionDigits: 0,
+  }).format(amount);
+};
+
+/**
+ * Formats a number using the Indian Number System (en-IN) without currency symbol.
+ * Useful for table cells where space is tight.
+ */
+export const formatNumberIndian = (amount: number) => {
+  return new Intl.NumberFormat('en-IN', {
+    maximumFractionDigits: 0,
   }).format(amount);
 };

@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 export enum Role {
@@ -41,6 +42,7 @@ export interface ExpenseRequest {
   financeComments?: string;
   rejectionReason?: string;
   attachmentName?: string;
+  attachmentData?: string; // Base64 encoded file data
   session: string;
   expenseDate: string;
   exceedsBudgetReason?: string;

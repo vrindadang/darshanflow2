@@ -1,23 +1,32 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useApp } from '../store.tsx';
 import { RequestStatus, QuarterlyBudget } from '../types.ts';
 import { BUDGET_GROUPS, CATEGORIES, SESSIONS, EXPENSE_POLICIES } from '../constants.ts';
-import { Card, Button, Input, Select, Label, Badge, formatCurrency, cn, StatCard } from '../components/ui.tsx';
+import { Card, Button, Input, Select, Label, Badge, formatCurrency, formatNumberIndian, cn, StatCard } from '../components/ui.tsx';
 import { 
   PlusCircle, XCircle, FileText, PieChart, Eye, Sparkles, Loader2, 
-  Clock, CheckCircle2, XCircle as XCircleIcon, Landmark, Search, History, LayoutDashboard, ShieldCheck, Info, ChevronRight, FileCheck
+  Clock, CheckCircle2, XCircle as XCircleIcon, Landmark, Search, History, LayoutDashboard, ShieldCheck, Info, ChevronRight, FileCheck, Calendar, Paperclip, X,
+  AlertCircle, Download, MailCheck, Send, Cloud
 } from 'lucide-react';
 import { enhanceDescription } from '../lib/gemini.ts';
 
 const Requestor: React.FC = () => {
   const { user, requests, addRequest, selectedRequest, setSelectedRequest, getQuarter, budgets } = useApp();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [mainView, setMainView] = useState<'requests' | 'budgets' | 'policies'>('requests');
   const [subView, setSubView] = useState<'dashboard' | 'new' | 'history'>('dashboard');
   const [budgetSession, setBudgetSession] = useState(SESSIONS[0]);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [policySearch, setPolicySearch] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const [showNotificationToast, setShowNotificationToast] = useState(false);
+
+  // Smart Loading States
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionStep, setSubmissionStep] = useState(0); // 0: Encoding, 1: Syncing, 2: Notifying, 3: Success
   
   // Filtering & Searching
   const [searchQuery, setSearchQuery] = useState('');
@@ -29,8 +38,12 @@ const Requestor: React.FC = () => {
     description: '',
     amount: '',
     session: SESSIONS[0],
-    expenseDate: new Date().toISOString().split('T')[0]
+    expenseDate: new Date().toISOString().split('T')[0],
+    attachmentName: '',
+    attachmentData: ''
   });
+
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const myRequests = useMemo(() => {
     let list = requests.filter(r => r.schoolId === user?.schoolId);
@@ -92,23 +105,192 @@ const Requestor: React.FC = () => {
     setIsEnhancing(false);
   };
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) { // 2MB Limit
+        alert("File too large. Maximum size allowed is 2MB.");
+        return;
+      }
+      
+      setIsProcessingFile(true);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setSelectedFile(file);
+        setFormData(prev => ({ 
+          ...prev, 
+          attachmentName: file.name,
+          attachmentData: reader.result as string
+        }));
+        setIsProcessingFile(false);
+      };
+      reader.onerror = () => {
+        alert("Failed to read file.");
+        setIsProcessingFile(false);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return; // Prevent double trigger
+    
+    setFormError(null);
+
+    if (isProcessingFile) {
+      setFormError("Attachment is still being processed. Please wait...");
+      return;
+    }
+
+    const amount = Number(formData.amount);
+    if (isNaN(amount) || amount <= 0) {
+      setFormError("Amount must be greater than zero. Requisition denied.");
+      return;
+    }
+
     if (!user?.schoolId || !user?.name) return;
-    addRequest({
+
+    // Start Smart Loading Sequence
+    setIsSubmitting(true);
+    setSubmissionStep(0); // Encoding phase
+
+    const submissionData = {
       schoolId: user.schoolId,
       schoolName: user.name,
       category: formData.category,
       description: formData.description,
-      amount: Number(formData.amount),
+      amount: amount,
       session: formData.session,
       expenseDate: formData.expenseDate,
-    });
-    setSubView('dashboard');
+      attachmentName: formData.attachmentName,
+      attachmentData: formData.attachmentData
+    };
+
+    // Transition to Syncing
+    setTimeout(() => setSubmissionStep(1), 800);
+
+    // Call Store Action
+    await addRequest(submissionData);
+    
+    // Transition to Notifying
+    setTimeout(() => setSubmissionStep(2), 1600);
+    
+    // Brief delay to simulate email drafting
+    await new Promise(resolve => setTimeout(resolve, 1200));
+
+    // Success State
+    setSubmissionStep(3);
+    
+    // Final wait for user to see success
+    setTimeout(() => {
+      setIsSubmitting(false);
+      setSubmissionStep(0);
+      setShowNotificationToast(true);
+      setTimeout(() => setShowNotificationToast(false), 5000);
+      setSubView('dashboard');
+      // Reset form states
+      setSelectedFile(null);
+      setFormData({
+        category: CATEGORIES[0],
+        description: '',
+        amount: '',
+        session: SESSIONS[0],
+        expenseDate: new Date().toISOString().split('T')[0],
+        attachmentName: '',
+        attachmentData: ''
+      });
+    }, 1500);
+  };
+
+  const handleViewAttachment = (filename: string, data?: string) => {
+    if (!data || data.trim() === "" || data.length < 50) {
+      alert("Attachment data is not yet synchronized or is missing. Please try again in 30 seconds.");
+      return;
+    }
+    try {
+      // Use a hidden anchor to trigger download safely
+      const link = document.createElement('a');
+      link.href = data;
+      link.download = filename;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      // Small delay before removal to ensure some browsers process it
+      setTimeout(() => {
+        if (document.body.contains(link)) document.body.removeChild(link);
+      }, 100);
+    } catch (e) {
+      console.error("Download failed:", e);
+      alert("Unable to open the attachment. The file might be corrupted or the browser blocked the action.");
+    }
   };
 
   return (
-    <div className="flex flex-col md:flex-row gap-8">
+    <div className="flex flex-col md:flex-row gap-8 relative">
+      {/* SMART LOADING OVERLAY */}
+      {isSubmitting && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm animate-fade-in p-4">
+           <Card className="w-full max-w-sm p-10 flex flex-col items-center text-center shadow-2xl border-none">
+              <div className="relative mb-8">
+                 {submissionStep < 3 ? (
+                   <>
+                    <div className="w-20 h-20 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin"></div>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                       {submissionStep === 0 && <Paperclip className="w-8 h-8 text-blue-600 animate-pulse" />}
+                       {submissionStep === 1 && <Cloud className="w-8 h-8 text-blue-600 animate-pulse" />}
+                       {submissionStep === 2 && <Send className="w-8 h-8 text-blue-600 animate-pulse" />}
+                    </div>
+                   </>
+                 ) : (
+                   <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center animate-bounce">
+                      <CheckCircle2 className="w-10 h-10" />
+                   </div>
+                 )}
+              </div>
+              
+              <div className="space-y-2">
+                 <h3 className="text-lg font-bold text-slate-900">
+                    {submissionStep === 0 && "Finalizing Documents"}
+                    {submissionStep === 1 && "Syncing with Cloud"}
+                    {submissionStep === 2 && "Notifying Auditor"}
+                    {submissionStep === 3 && "Submission Complete"}
+                 </h3>
+                 <p className="text-xs text-slate-500 font-medium leading-relaxed px-4">
+                    {submissionStep === 0 && "Your attachment is being securely encoded for foundation records."}
+                    {submissionStep === 1 && "Establishing secure handshake with Darshan Foundation servers."}
+                    {submissionStep === 2 && "Drafting official notification for intauditor@darshanacademy.org"}
+                    {submissionStep === 3 && "Requisition logged and Auditor has been alerted via priority email."}
+                 </p>
+              </div>
+
+              {/* Step Indicators */}
+              <div className="flex gap-2 mt-8">
+                 {[0, 1, 2].map(step => (
+                   <div key={step} className={cn(
+                     "h-1.5 w-8 rounded-full transition-all duration-500",
+                     submissionStep === step ? "bg-blue-600 w-12" : (submissionStep > step ? "bg-emerald-500" : "bg-slate-100")
+                   )}></div>
+                 ))}
+              </div>
+           </Card>
+        </div>
+      )}
+
+      {/* Toast Notification for Email */}
+      {showNotificationToast && (
+        <div className="fixed top-20 right-4 z-[100] animate-bounce">
+          <div className="bg-emerald-600 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 border border-emerald-500">
+             <MailCheck className="w-6 h-6" />
+             <div>
+                <p className="font-bold text-sm">Auditor Notified!</p>
+                <p className="text-[10px] opacity-90">Email sent to intauditor@darshanacademy.org</p>
+             </div>
+             <button onClick={() => setShowNotificationToast(false)} className="p-1 hover:bg-emerald-500 rounded"><X className="w-4 h-4" /></button>
+          </div>
+        </div>
+      )}
+
       {/* Sidebar Navigation */}
       <div className="w-full md:w-72 flex-shrink-0 space-y-4">
         <Card className="p-4 space-y-1">
@@ -275,6 +457,12 @@ const Requestor: React.FC = () => {
                   <Button variant="ghost" onClick={() => setSubView('dashboard')}><XCircleIcon className="w-5 h-5" /></Button>
                 </div>
 
+                {formError && (
+                  <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl text-red-700 text-sm font-bold flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4" /> {formError}
+                  </div>
+                )}
+
                 <form onSubmit={handleFormSubmit} className="space-y-6">
                    <div className="grid grid-cols-2 gap-6">
                      <div className="space-y-2">
@@ -288,7 +476,17 @@ const Requestor: React.FC = () => {
                        </Select>
                      </div>
                      <div className="space-y-2">
-                       <Label>Date of Expense</Label>
+                       <div className="flex justify-between items-center">
+                          <Label>Date of Expense</Label>
+                          {formData.expenseDate && (
+                            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-blue-50 border border-blue-100 rounded-md">
+                               <Calendar className="w-3 h-3 text-blue-600" />
+                               <span className="text-[10px] font-black text-blue-700 uppercase tracking-wider">
+                                 Pertains to {getQuarter(formData.expenseDate).toUpperCase()}
+                               </span>
+                            </div>
+                          )}
+                       </div>
                        <Input 
                         type="date" 
                         value={formData.expenseDate} 
@@ -335,9 +533,59 @@ const Requestor: React.FC = () => {
                    </div>
 
                    <div className="space-y-2">
+                     <Label>Supporting Documents (Invoices/Bills)</Label>
+                     <div 
+                        onClick={() => fileInputRef.current?.click()}
+                        className={cn(
+                          "border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center gap-3 transition-all cursor-pointer",
+                          selectedFile ? "border-emerald-200 bg-emerald-50/30" : "border-slate-200 bg-slate-50/30 hover:border-blue-300 hover:bg-blue-50/30"
+                        )}
+                     >
+                        {isProcessingFile ? (
+                           <div className="flex flex-col items-center gap-2">
+                              <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+                              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Encoding Content...</p>
+                           </div>
+                        ) : selectedFile ? (
+                          <div className="flex flex-col items-center gap-2">
+                             <div className="p-3 bg-emerald-100 text-emerald-600 rounded-full"><FileText className="w-6 h-6" /></div>
+                             <div className="text-center">
+                                <p className="text-sm font-bold text-slate-900">{selectedFile.name}</p>
+                                <p className="text-[10px] text-slate-500">{(selectedFile.size / 1024).toFixed(1)} KB</p>
+                             </div>
+                             <button 
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setSelectedFile(null); setFormData(p => ({...p, attachmentName: '', attachmentData: ''})); }}
+                                className="text-xs text-rose-600 font-bold uppercase hover:underline mt-2"
+                             >
+                                Remove
+                             </button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="p-3 bg-white shadow-sm rounded-full text-slate-400"><Paperclip className="w-6 h-6" /></div>
+                            <div className="text-center">
+                               <p className="text-sm font-bold text-slate-900">Click to upload attachment</p>
+                               <p className="text-xs text-slate-500">PDF, JPG or PNG (Max 2MB)</p>
+                            </div>
+                          </>
+                        )}
+                        <input 
+                          type="file" 
+                          ref={fileInputRef} 
+                          onChange={handleFileChange} 
+                          className="hidden" 
+                          accept=".pdf,.jpg,.jpeg,.png" 
+                        />
+                     </div>
+                   </div>
+
+                   <div className="space-y-2">
                      <Label>Net Amount (INR)</Label>
                      <Input 
                         type="number" 
+                        min="0.01"
+                        step="0.01"
                         value={formData.amount} 
                         onChange={(e) => setFormData({...formData, amount: e.target.value})} 
                         placeholder="0.00" 
@@ -347,7 +595,13 @@ const Requestor: React.FC = () => {
 
                    <div className="flex justify-end gap-3 pt-6 border-t border-slate-100">
                       <Button variant="outline" type="button" onClick={() => setSubView('dashboard')} className="px-8">Discard</Button>
-                      <Button type="submit" className="px-8 bg-blue-600 hover:bg-blue-700">Submit Request</Button>
+                      <Button type="submit" disabled={isProcessingFile || isSubmitting} className="px-8 bg-blue-600 hover:bg-blue-700">
+                         {isSubmitting ? "Processing..." : "Submit Request"}
+                      </Button>
+                   </div>
+                   
+                   <div className="pt-2 text-center">
+                      <p className="text-[10px] text-slate-400 italic">Upon submission, an automated alert will be sent to the Internal Auditor.</p>
                    </div>
                 </form>
               </Card>
@@ -448,13 +702,13 @@ const Requestor: React.FC = () => {
                                          const bal = appr - cons;
                                          return (
                                             <React.Fragment key={q}>
-                                               <td className="px-2 py-2 text-right border-l border-slate-100">{formatCurrency(appr).replace('₹', '')}</td>
-                                               <td className="px-2 py-2 text-right text-blue-600 font-medium">{formatCurrency(cons).replace('₹', '')}</td>
-                                               <td className={cn("px-2 py-2 text-right font-bold", bal >= 0 ? "text-emerald-600" : "text-rose-600")}>{formatCurrency(bal).replace('₹', '')}</td>
+                                               <td className="px-2 py-2 text-right border-l border-slate-100">{formatNumberIndian(appr)}</td>
+                                               <td className="px-2 py-2 text-right text-blue-600 font-medium">{formatNumberIndian(cons)}</td>
+                                               <td className={cn("px-2 py-2 text-right font-bold", bal >= 0 ? "text-emerald-600" : "text-rose-600")}>{formatNumberIndian(bal)}</td>
                                             </React.Fragment>
                                          );
                                       })}
-                                      <td className="px-4 py-2 text-right font-bold bg-slate-50/50 border-l border-slate-200 text-slate-900">{formatCurrency(row.q1+row.q2+row.q3+row.q4)}</td>
+                                      <td className="px-4 py-2 text-right font-bold bg-slate-50/50 border-l border-slate-200 text-slate-900">{formatNumberIndian(row.q1+row.q2+row.q3+row.q4)}</td>
                                    </tr>
                                 );
                              })}
@@ -557,11 +811,30 @@ const Requestor: React.FC = () => {
                  </button>
               </div>
               
-              <div className="p-8 space-y-8">
+              <div className="p-8 space-y-6">
                  <div className="space-y-2">
                     <Label className="text-[10px] uppercase tracking-widest text-slate-400">Request Details</Label>
                     <p className="text-slate-700 leading-relaxed font-medium bg-slate-50 p-4 rounded-2xl border border-slate-100 italic">"{selectedRequest.description}"</p>
                  </div>
+
+                 {selectedRequest.attachmentName && (
+                   <div className="space-y-2">
+                      <Label className="text-[10px] uppercase tracking-widest text-slate-400">Supporting Attachment</Label>
+                      <div 
+                         onClick={() => handleViewAttachment(selectedRequest.attachmentName!, selectedRequest.attachmentData)}
+                         className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl group hover:border-blue-300 hover:bg-blue-50/30 transition-all cursor-pointer"
+                      >
+                         <div className="flex items-center gap-3">
+                            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-all"><FileText className="w-4 h-4" /></div>
+                            <span className="text-xs font-bold text-slate-700">{selectedRequest.attachmentName}</span>
+                         </div>
+                         <div className="flex items-center gap-2">
+                            <span className="text-[9px] font-bold text-blue-600 uppercase tracking-widest group-hover:underline">Download Bill</span>
+                            <Download className="w-3 h-3 text-blue-600" />
+                         </div>
+                      </div>
+                   </div>
+                 )}
 
                  <div className="grid grid-cols-2 gap-4">
                     <div className="p-6 bg-blue-50/50 rounded-2xl border border-blue-100">

@@ -3,7 +3,9 @@ import React, { createContext, useContext, useState, ReactNode, useEffect, useCa
 import { ExpenseRequest, User, Role, RequestStatus, BudgetMap, QuarterlyBudget, BudgetLog, BudgetRequest } from './types.ts';
 import { MOCK_REQUESTS, SCHOOLS, INITIAL_BUDGETS, CATEGORIES } from './constants.ts';
 import { mongoDB } from './db.ts';
-import { Loader2, ShieldCheck } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { composeAuditorNotification } from './lib/gemini.ts';
+import Logo from './components/Logo.tsx';
 
 interface BudgetStats {
   budget: number;
@@ -46,10 +48,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [budgetLogs, setBudgetLogs] = useState<BudgetLog[]>([]);
   const [selectedRequest, setSelectedRequest] = useState<ExpenseRequest | null>(null);
 
-  // Reusable refresh logic for background sync
   const refreshData = useCallback(async (isInitial = false) => {
     try {
-      // Explicitly trigger a connection check during initial refresh to update UI state
       if (isInitial && mongoDB.isLive) {
         await mongoDB.testConnection();
       }
@@ -61,10 +61,31 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         mongoDB.find('budgets')
       ]);
       
-      if (requestsRes.documents?.length > 0) {
-        setRequests(requestsRes.documents.sort((a: any, b: any) => 
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        ));
+      if (requestsRes.documents) {
+        const serverRequests = requestsRes.documents as ExpenseRequest[];
+        setRequests(prev => {
+          if (isInitial && serverRequests.length > 0) return serverRequests;
+          if (isInitial && serverRequests.length === 0) return MOCK_REQUESTS;
+          const serverMap = new Map(serverRequests.map(r => [r.id, r]));
+          const merged = [...prev];
+          const result = merged.map(localReq => {
+            const serverReq = serverMap.get(localReq.id);
+            if (serverReq) {
+              if (localReq.attachmentData && !serverReq.attachmentData) {
+                return { ...serverReq, attachmentData: localReq.attachmentData, attachmentName: localReq.attachmentName };
+              }
+              return serverReq;
+            }
+            return localReq;
+          });
+          const localIds = new Set(merged.map(r => r.id));
+          serverRequests.forEach(serverReq => {
+            if (!localIds.has(serverReq.id)) {
+              result.push(serverReq);
+            }
+          });
+          return result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        });
       } else if (isInitial) {
         setRequests(MOCK_REQUESTS);
         if (mongoDB.isLive) await mongoDB.bulkPut('requests', MOCK_REQUESTS);
@@ -91,16 +112,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, []);
 
-  // Initial Hydration
   useEffect(() => {
     const hydrate = async () => {
       try {
-        // Find session - uses local request under the hood
         const sessionRes = await mongoDB.find('session', { id: 'current_user' });
         if (sessionRes.documents?.[0]?.user) {
           setUser(sessionRes.documents[0].user);
         }
-        // Load data and check Supabase connectivity
         await refreshData(true);
       } catch (error) {
         console.error("Hydration failed", error);
@@ -111,20 +129,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     hydrate();
   }, [refreshData]);
 
-  // Background Sync Engine (Polls every 15 seconds)
   useEffect(() => {
     if (!user) return;
-    const interval = setInterval(() => {
-      refreshData();
-    }, 15000);
+    const interval = setInterval(() => { refreshData(); }, 15000);
     return () => clearInterval(interval);
   }, [user, refreshData]);
 
   const login = async (newUser: User) => {
     setUser(newUser);
-    // Explicitly update session with id to ensure persistence
     await mongoDB.updateOne('session', 'current_user', { id: 'current_user', user: newUser });
-    // Refresh data to ensure UI syncs with cloud if applicable
     await refreshData();
   };
   
@@ -147,7 +160,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const shortCode = school ? school.shortCode : 'DEF';
     const uniqueNum = Math.floor(1000 + Math.random() * 9000);
     const newId = `${shortCode}/${req.session}/${uniqueNum}`;
-
     const newRequest: ExpenseRequest = {
       ...req,
       id: newId,
@@ -155,42 +167,30 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    
     setRequests(prev => [newRequest, ...prev]);
-    await mongoDB.insertOne('requests', newRequest);
+    try {
+      await mongoDB.insertOne('requests', newRequest);
+      const emailDraft = await composeAuditorNotification(newRequest);
+      console.log(`[MAIL SERVER] Sending Requisition Alert...`, emailDraft);
+    } catch (e) {
+      console.error("Storage/Notification failed:", e);
+    }
   };
 
   const updateRequestStatus = async (id: string, status: RequestStatus, comments: string) => {
     const req = requests.find(r => r.id === id);
     if (!req) return;
-
     const updated = { ...req, status, updatedAt: new Date().toISOString() };
-    if (status === RequestStatus.APPROVED || status === RequestStatus.REJECTED) {
-      updated.approverComments = comments;
-    }
-    if (status === RequestStatus.DISBURSED) {
-      updated.financeComments = comments;
-    }
-
+    if (status === RequestStatus.APPROVED || status === RequestStatus.REJECTED) updated.approverComments = comments;
+    if (status === RequestStatus.DISBURSED) updated.financeComments = comments;
     setRequests(prev => prev.map(r => r.id === id ? updated : r));
     await mongoDB.updateOne('requests', id, updated);
   };
 
   const updateBudget = async (schoolId: string, category: string, quarter: keyof QuarterlyBudget, amount: number) => {
     const currentSchoolData = budgets[schoolId] || {};
-    const updatedCategory = {
-      ...(currentSchoolData[category] || { q1: 0, q2: 0, q3: 0, q4: 0 }),
-      [quarter]: amount
-    };
-    
-    const updatedBudgets = {
-      ...budgets,
-      [schoolId]: {
-        ...currentSchoolData,
-        [category]: updatedCategory
-      }
-    };
-
+    const updatedCategory = { ...(currentSchoolData[category] || { q1: 0, q2: 0, q3: 0, q4: 0 }), [quarter]: amount };
+    const updatedBudgets = { ...budgets, [schoolId]: { ...currentSchoolData, [category]: updatedCategory } };
     setBudgets(updatedBudgets);
     await mongoDB.updateOne('budgets', schoolId, { data: updatedBudgets[schoolId] });
   };
@@ -198,16 +198,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const addBudgetRequest = async (req: Omit<BudgetRequest, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => {
     const school = SCHOOLS.find(s => s.id === req.schoolId);
     const shortCode = school ? school.shortCode : 'DEF';
-    const uniqueNum = Math.floor(100 + Math.random() * 900);
-    
     const newRequest: BudgetRequest = {
       ...req,
-      id: `BP/${shortCode}/${uniqueNum}`,
+      id: `BP/${shortCode}/${Math.floor(100 + Math.random() * 900)}`,
       status: 'PENDING',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    
     setBudgetRequests(prev => [newRequest, ...prev]);
     await mongoDB.insertOne('budgetRequests', newRequest);
   };
@@ -219,7 +216,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       mongoDB.updateOne('budgetRequests', id, updated);
       return updated;
     }));
-
     if (status === 'APPROVED' && approvedData) {
        const req = budgetRequests.find(r => r.id === id);
        if (req) {
@@ -228,19 +224,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
              if (plan) {
                 for (const q of (['q1', 'q2', 'q3', 'q4'] as const)) {
                    const oldAmount = budgets[req.schoolId]?.[cat]?.[q] || 0;
-                   const newAmount = plan[q];
-                   
-                   if (oldAmount !== newAmount) {
-                      await updateBudget(req.schoolId, cat, q, newAmount);
-                      await addBudgetLog({
-                         adminName: user?.name || 'Admin',
-                         schoolName: req.schoolName,
-                         session: req.session,
-                         category: cat,
-                         quarter: q.toUpperCase(),
-                         oldAmount,
-                         newAmount
-                      });
+                   if (oldAmount !== plan[q]) {
+                      await updateBudget(req.schoolId, cat, q, plan[q]);
+                      await addBudgetLog({ adminName: user?.name || 'Admin', schoolName: req.schoolName, session: req.session, category: cat, quarter: q.toUpperCase(), oldAmount, newAmount: plan[q] });
                    }
                 }
              }
@@ -250,18 +236,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const addBudgetLog = async (log: Omit<BudgetLog, 'id' | 'timestamp'>) => {
-    const newLog: BudgetLog = {
-      ...log,
-      id: Math.random().toString(36).substr(2, 9),
-      timestamp: new Date().toISOString()
-    };
+    const newLog: BudgetLog = { ...log, id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString() };
     setBudgetLogs(prev => [newLog, ...prev]);
     await mongoDB.insertOne('budgetLogs', newLog);
   };
 
   const getQuarter = (dateStr: string): keyof QuarterlyBudget => {
-    const date = new Date(dateStr);
-    const month = date.getMonth();
+    const month = new Date(dateStr).getMonth();
     if (month >= 3 && month <= 5) return 'q1';
     if (month >= 6 && month <= 8) return 'q2';
     if (month >= 9 && month <= 11) return 'q3';
@@ -272,45 +253,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const categoryBudget = budgets[schoolId]?.[category] || { q1: 0, q2: 0, q3: 0, q4: 0 };
     let budget = 0;
     let used = 0;
-    const matchesSession = (r: ExpenseRequest) => session ? r.session === session : true;
-
     if (dateStr) {
       const quarter = getQuarter(dateStr);
       budget = categoryBudget[quarter];
-      used = requests
-        .filter(r => 
-          r.schoolId === schoolId && 
-          r.category === category && 
-          r.status !== RequestStatus.REJECTED &&
-          getQuarter(r.expenseDate) === quarter &&
-          matchesSession(r)
-        )
-        .reduce((sum, r) => sum + r.amount, 0);
+      used = requests.filter(r => r.schoolId === schoolId && r.category === category && r.status !== RequestStatus.REJECTED && getQuarter(r.expenseDate) === quarter && (session ? r.session === session : true)).reduce((sum, r) => sum + r.amount, 0);
     } else {
       budget = categoryBudget.q1 + categoryBudget.q2 + categoryBudget.q3 + categoryBudget.q4;
-      used = requests
-        .filter(r => 
-          r.schoolId === schoolId && 
-          r.category === category && 
-          r.status !== RequestStatus.REJECTED &&
-          matchesSession(r)
-        )
-        .reduce((sum, r) => sum + r.amount, 0);
+      used = requests.filter(r => r.schoolId === schoolId && r.category === category && r.status !== RequestStatus.REJECTED && (session ? r.session === session : true)).reduce((sum, r) => sum + r.amount, 0);
     }
-
     return { budget, used, remaining: budget - used };
   };
 
   if (!isHydrated) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 gap-4">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 gap-6">
         <div className="relative">
-           <ShieldCheck className="w-16 h-16 text-blue-600 animate-pulse" />
-           <Loader2 className="w-6 h-6 text-blue-400 animate-spin absolute -bottom-2 -right-2" />
+           <Logo className="w-48 h-48 animate-pulse drop-shadow-xl" />
+           <Loader2 className="w-10 h-10 text-blue-500 animate-spin absolute bottom-2 right-2" />
         </div>
         <div className="text-center">
-           <p className="text-slate-900 font-bold text-lg">Initializing DarshanFlow</p>
-           <p className="text-slate-400 text-sm">Syncing with your workspace...</p>
+           <p className="text-slate-900 font-bold text-xl tracking-tight">Initializing DarshanFlow</p>
+           <p className="text-slate-400 text-sm font-medium">Establishing secure foundation cloud sync...</p>
         </div>
       </div>
     );

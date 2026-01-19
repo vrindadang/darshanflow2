@@ -1,8 +1,9 @@
+
 import React, { useState } from 'react';
 import { useApp } from '../store.tsx';
 import { RequestStatus, ExpenseRequest, QuarterlyBudget, BudgetRequest } from '../types.ts';
-import { Card, Button, Badge, formatCurrency, cn, Input, Select, Label } from '../components/ui.tsx';
-import { Check, AlertCircle, XCircle, Eye, Wallet, Save, Pencil, Bot, Loader2 } from 'lucide-react';
+import { Card, Button, Badge, formatCurrency, formatNumberIndian, cn, Input, Select, Label } from '../components/ui.tsx';
+import { Check, AlertCircle, XCircle, Eye, Wallet, Save, Pencil, Bot, Loader2, FileText, Download } from 'lucide-react';
 import { BUDGET_GROUPS, CATEGORIES, SCHOOLS, SESSIONS } from '../constants.ts';
 import { analyzeRequest } from '../lib/gemini.ts';
 
@@ -71,6 +72,10 @@ const Approver: React.FC = () => {
 
   const submitAction = () => {
     if (selectedRequest && actionType) {
+      if (!comment.trim()) {
+        alert("A comment is mandatory for all approval or rejection actions.");
+        return;
+      }
       updateRequestStatus(
         selectedRequest.id,
         actionType === 'APPROVE' ? RequestStatus.APPROVED : RequestStatus.REJECTED,
@@ -123,6 +128,24 @@ const Approver: React.FC = () => {
       }
     });
     setIsEditingBudget(false);
+  };
+
+  const handleViewAttachment = (filename: string, data?: string) => {
+    if (!data || data.trim() === "") {
+      alert("No digital document data available for this request. Please contact the school to re-upload.");
+      return;
+    }
+    try {
+      const link = document.createElement('a');
+      link.href = data;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (e) {
+      console.error("Download error:", e);
+      alert("Error opening document. File may be incomplete.");
+    }
   };
 
   return (
@@ -296,16 +319,16 @@ const Approver: React.FC = () => {
                                             value={appr}
                                             onChange={(e) => setLocalBudgets(prev => ({ ...prev, [cat]: { ...prev[cat], [q]: Number(e.target.value) } }))}
                                           />
-                                        ) : formatCurrency(appr).replace('₹', '')}
+                                        ) : formatNumberIndian(appr)}
                                       </td>
-                                      <td className="px-2 py-1.5 border text-right text-gray-500">{formatCurrency(cons).replace('₹', '')}</td>
+                                      <td className="px-2 py-1.5 border text-right text-gray-500">{formatNumberIndian(cons)}</td>
                                       <td className={cn("px-2 py-1.5 border text-right font-semibold", bal >= 0 ? "text-green-600" : "text-red-600")}>
-                                        {formatCurrency(bal).replace('₹', '')}
+                                        {formatNumberIndian(bal)}
                                       </td>
                                     </React.Fragment>
                                   );
                                 })}
-                                <td className="px-3 py-1.5 border text-right font-bold text-blue-800 bg-blue-50">{formatCurrency(totalYear)}</td>
+                                <td className="px-3 py-1.5 border text-right font-bold text-blue-800 bg-blue-50">{formatNumberIndian(totalYear)}</td>
                               </tr>
                             );
                           })}
@@ -351,6 +374,26 @@ const Approver: React.FC = () => {
                   <p className="p-4 border border-gray-200 rounded-xl bg-slate-50 text-gray-700 leading-relaxed shadow-inner italic">"{selectedRequest.description}"</p>
                </div>
 
+               {selectedRequest.attachmentName && (
+                  <div>
+                    <Label>School Attachment</Label>
+                    <div 
+                       onClick={() => handleViewAttachment(selectedRequest.attachmentName!, selectedRequest.attachmentData)}
+                       className="flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl hover:border-blue-300 hover:bg-blue-50/50 transition-all cursor-pointer group"
+                    >
+                       <div className="p-2 bg-blue-100 text-blue-600 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-all"><FileText className="w-5 h-5" /></div>
+                       <div className="flex-1">
+                          <p className="text-xs font-bold text-slate-800">{selectedRequest.attachmentName}</p>
+                          <p className="text-[10px] text-slate-500">Supporting Document Provided</p>
+                       </div>
+                       <div className="flex items-center gap-2">
+                         <div className="text-[10px] font-bold text-blue-600 uppercase tracking-widest px-3 py-1 bg-blue-50 rounded-md">Download Bill</div>
+                         <Download className="w-4 h-4 text-blue-600" />
+                       </div>
+                    </div>
+                  </div>
+               )}
+
                {/* AI Section */}
                <div className="border-t border-gray-100 pt-4">
                   <div className="flex justify-between items-center mb-4">
@@ -375,26 +418,71 @@ const Approver: React.FC = () => {
                   )}
                </div>
 
-               {!actionType ? (
-                  <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-                     <Button variant="danger" onClick={() => setActionType('REJECT')}>Reject</Button>
-                     <Button onClick={() => setActionType('APPROVE')} className="bg-green-600">Approve Request</Button>
-                  </div>
-               ) : (
-                  <div className="space-y-4 pt-4 border-t border-gray-100">
-                     <Label>{actionType === 'APPROVE' ? 'Approval Remarks' : 'Rejection Reason'}</Label>
-                     <textarea 
-                        className="w-full border border-gray-200 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none h-24 text-sm"
-                        placeholder="Enter your comments for the school record..."
-                        value={comment}
-                        onChange={(e) => setComment(e.target.value)}
-                        autoFocus
-                     />
-                     <div className="flex justify-end gap-2">
-                        <Button variant="outline" size="sm" onClick={() => setActionType(null)}>Back</Button>
-                        <Button onClick={submitAction} size="sm" className={actionType === 'APPROVE' ? "bg-green-600" : "bg-red-600"}>Confirm {actionType}</Button>
-                     </div>
-                  </div>
+               {selectedRequest.status === RequestStatus.PENDING && (
+                 <>
+                   {!actionType ? (
+                      <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                         <Button variant="danger" onClick={() => setActionType('REJECT')}>Reject</Button>
+                         <Button onClick={() => setActionType('APPROVE')} className="bg-green-600">Approve Request</Button>
+                      </div>
+                   ) : (
+                      <div className="space-y-4 pt-4 border-t border-gray-100 animate-fade-in">
+                         <div className="flex justify-between items-center">
+                            <Label className="mb-0">{actionType === 'APPROVE' ? 'Approval Remarks' : 'Rejection Reason'} <span className="text-red-500">*</span></Label>
+                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Comments Mandatory</span>
+                         </div>
+                         <textarea 
+                            className={cn(
+                              "w-full border p-3 rounded-xl outline-none h-24 text-sm transition-all focus:ring-4 focus:ring-blue-500/10",
+                              !comment.trim() ? "border-amber-200 bg-amber-50/30" : "border-gray-200 focus:border-blue-500"
+                            )}
+                            placeholder={actionType === 'APPROVE' ? "e.g. Approved for sports day requisitions as per policy B-12..." : "e.g. Rejected due to missing vendor quotes. Please re-apply with 3 competitive quotes."}
+                            value={comment}
+                            onChange={(e) => setComment(e.target.value)}
+                            autoFocus
+                         />
+                         {!comment.trim() && (
+                            <div className="flex items-center gap-1.5 text-rose-500 text-[10px] font-bold uppercase tracking-widest mt-1">
+                               <AlertCircle className="w-3 h-3" /> Action blocked until comment is provided
+                            </div>
+                         )}
+                         <div className="flex justify-end gap-2 pt-2">
+                            <Button variant="outline" size="sm" onClick={() => { setActionType(null); setComment(''); }}>Back</Button>
+                            <Button 
+                              onClick={submitAction} 
+                              size="sm" 
+                              disabled={!comment.trim()}
+                              className={cn(
+                                actionType === 'APPROVE' ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700",
+                                !comment.trim() && "opacity-50 cursor-not-allowed"
+                              )}
+                            >
+                               Confirm {actionType}
+                            </Button>
+                         </div>
+                      </div>
+                   )}
+                 </>
+               )}
+
+               {selectedRequest.status !== RequestStatus.PENDING && (
+                 <div className="space-y-4 pt-4 border-t border-gray-100">
+                    <Label>Process Summary</Label>
+                    <div className="grid grid-cols-1 gap-3">
+                       {selectedRequest.approverComments && (
+                         <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Approver's Feedback</span>
+                            <p className="text-xs font-medium text-slate-800 italic">"{selectedRequest.approverComments}"</p>
+                         </div>
+                       )}
+                       {selectedRequest.financeComments && (
+                         <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl">
+                            <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest block mb-1">Payment Reference</span>
+                            <p className="text-xs font-bold text-emerald-800">{selectedRequest.financeComments}</p>
+                         </div>
+                       )}
+                    </div>
+                 </div>
                )}
             </div>
           </Card>

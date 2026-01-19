@@ -1,8 +1,9 @@
+
 import React, { useState } from 'react';
 import { useApp } from '../store.tsx';
 import { RequestStatus } from '../types.ts';
-import { Card, Button, Badge, formatCurrency, Input, cn } from '../components/ui.tsx';
-import { Wallet, CheckCheck, History, Search, ArrowUpRight, XCircle, AlertCircle, CreditCard } from 'lucide-react';
+import { Card, Button, Badge, formatCurrency, Input, cn, Label } from '../components/ui.tsx';
+import { Wallet, CheckCheck, History, Search, ArrowUpRight, XCircle, AlertCircle, CreditCard, FileText, Download } from 'lucide-react';
 
 const Finance: React.FC = () => {
   const { requests, updateRequestStatus, selectedRequest, setSelectedRequest } = useApp();
@@ -43,6 +44,19 @@ const Finance: React.FC = () => {
   const openRequest = (req: typeof requests[0]) => {
     setSelectedRequest(req);
     setComment('');
+  };
+
+  const handleViewAttachment = (filename: string, data?: string) => {
+    if (!data) {
+      alert("No document data available for this request.");
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = data;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -211,6 +225,24 @@ const Finance: React.FC = () => {
                  <p><span className="font-semibold text-gray-900">Category:</span> {selectedRequest.category}</p>
                  <p className="mt-1"><span className="font-semibold text-gray-900">Reason:</span> <br/> <span className="italic">"{selectedRequest.description}"</span></p>
                </div>
+
+               {selectedRequest.attachmentName && (
+                  <div className="mt-3 pt-3 border-t border-gray-200">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Original School Attachment</span>
+                    <div 
+                       onClick={() => handleViewAttachment(selectedRequest.attachmentName!, selectedRequest.attachmentData)}
+                       className="flex items-center gap-3 p-2 bg-white border border-slate-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-all cursor-pointer group"
+                    >
+                       <FileText className="w-4 h-4 text-blue-600 group-hover:scale-110 transition-transform" />
+                       <span className="text-xs font-bold text-slate-700 flex-1 truncate">{selectedRequest.attachmentName}</span>
+                       <div className="flex items-center gap-2">
+                         <span className="text-[9px] font-bold text-blue-600 uppercase tracking-widest">Download</span>
+                         <Download className="w-3 h-3 text-blue-600" />
+                       </div>
+                    </div>
+                  </div>
+               )}
+
                {selectedRequest.approverComments && (
                  <div className="mt-2 pt-2 border-t border-gray-200">
                    <span className="font-semibold text-gray-900">Admin Approval Note:</span>

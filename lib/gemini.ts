@@ -1,3 +1,4 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { ExpenseRequest } from "../types.ts";
 
@@ -43,5 +44,48 @@ export const analyzeRequest = async (req: ExpenseRequest): Promise<string> => {
   } catch (error) {
     console.error("Gemini analysis error:", error);
     return "AI Analysis unavailable at this time.";
+  }
+};
+
+/**
+ * Drafts a professional notification email for the internal auditor.
+ */
+export const composeAuditorNotification = async (req: ExpenseRequest): Promise<{ subject: string; body: string }> => {
+  try {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const prompt = `
+      Create a professional email notification for an Internal Auditor regarding a new fund requisition.
+      
+      Details:
+      - ID: ${req.id}
+      - School: ${req.schoolName}
+      - Category: ${req.category}
+      - Amount: ₹${req.amount}
+      - Purpose: ${req.description}
+      - Requisition Date: ${new Date().toLocaleDateString('en-IN')}
+
+      The recipient is 'Internal Auditor (intauditor@darshanacademy.org)'.
+      Provide the output as a JSON object with 'subject' and 'body' fields.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json'
+      }
+    });
+
+    const result = JSON.parse(response.text || '{"subject": "", "body": ""}');
+    return {
+      subject: result.subject || `New Fund Requisition: ${req.id}`,
+      body: result.body || `A new requisition has been submitted by ${req.schoolName} for ₹${req.amount}.`
+    };
+  } catch (error) {
+    console.error("Gemini notification drafting error:", error);
+    return {
+      subject: `New Fund Requisition: ${req.id}`,
+      body: `Alert: A new fund requisition of ₹${req.amount} for ${req.category} has been submitted by ${req.schoolName}. Reference ID: ${req.id}.`
+    };
   }
 };
